@@ -47,7 +47,13 @@ button { cursor: pointer; }
 button:hover:not(:disabled) { background: rgba(255,255,255,.12); }
 button:disabled { opacity: .4; cursor: default; }
 button.primary { width: 100%; background: linear-gradient(90deg, #ff9a2e, #ffcc4d); color: #1a0f00; font-weight: 800; border: 0; letter-spacing: .1em; }
-#claimbtn { width: 100%; margin-top: 6px; }
+#claimbtn, #jackbtn { width: 100%; margin-top: 6px; }
+#walletbox { margin-bottom: 8px; }
+#walletbox > button { width: 100%; }
+#walletmenu { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.getfomo { display: flex; gap: 6px; margin: 6px 0 4px; }
+.getfomo input { flex: 1; min-width: 0; text-align: right; }
+.getfomo button { white-space: nowrap; border-color: var(--meteora); color: var(--meteora); }
 .hint { color: var(--dim); font-size: 11px; margin-top: 4px; }
 #lead li { display: flex; justify-content: space-between; padding: 2px 0; }
 #lead { counter-reset: r; }

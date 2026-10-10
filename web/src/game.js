@@ -4,7 +4,9 @@
 
 export const DECIMALS = 6;
 export const UNIT = 10 ** DECIMALS;
-export const ACC_PRECISION = 1_000_000_000_000; // 1e12, scales per-floor dividend accumulator
+// 1e12, scales the per-floor dividend accumulator. The accumulator is a BigInt because
+// it passes 2^53 almost immediately (dividends × 1e12); lib.rs keeps it in a u128.
+export const ACC_PRECISION = 1_000_000_000_000n;
 
 // Basis points; must sum to 10_000.
 export const SPLIT = {
@@ -52,7 +54,7 @@ export function newRound(id, now, params, seedJackpot = 0) {
     jackpot: seedJackpot,
     nextRoundPot: 0,
     devFees: 0,
-    accPerFloor: 0, // scaled by ACC_PRECISION
+    accPerFloor: 0n, // BigInt, scaled by ACC_PRECISION
     lastBuyer: null,
     settled: false,
     winner: null,
@@ -67,7 +69,7 @@ export function isLive(round, now) {
 export function pendingDividends(round, who) {
   const p = round.players[who];
   if (!p) return 0;
-  return Math.floor((p.floors * round.accPerFloor) / ACC_PRECISION) - p.rewardDebt;
+  return Number((BigInt(p.floors) * round.accPerFloor) / ACC_PRECISION) - p.rewardDebt;
 }
 
 // Returns a receipt describing exactly where the money went.
@@ -84,7 +86,7 @@ export function buy(round, params, who, n, now) {
   // Dividends go to floors that existed *before* this buy. First buyer of a
   // round has nobody to pay, so that slice rolls into the jackpot.
   if (round.totalFloors > 0) {
-    round.accPerFloor += Math.floor((toDividends * ACC_PRECISION) / round.totalFloors);
+    round.accPerFloor += (BigInt(toDividends) * ACC_PRECISION) / BigInt(round.totalFloors);
   } else {
     toJackpot += toDividends;
   }
@@ -96,7 +98,7 @@ export function buy(round, params, who, n, now) {
   const p = (round.players[who] ??= { floors: 0, rewardDebt: 0, claimed: 0 });
   p.floors += n;
   // New floors start with zero accrued dividends.
-  p.rewardDebt += Math.floor((n * round.accPerFloor) / ACC_PRECISION);
+  p.rewardDebt += Number((BigInt(n) * round.accPerFloor) / ACC_PRECISION);
   round.totalFloors += n;
   round.lastBuyer = who;
   round.endTs = Math.min(round.endTs + n * params.timeAddPerFloor, now + params.maxTimer);
@@ -140,5 +142,10 @@ export function fundFromBuyback(round, out, now) {
   return { out, toJackpot, toNext, burn };
 }
 
-export const fmt = (base, dp = 2) =>
-  (base / UNIT).toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp });
+// Token amounts for display. Real launches price floors in millions of FOMO, so large
+// values switch to compact notation (3.20M).
+export const fmt = (base, dp = 2) => {
+  const v = base / UNIT;
+  if (Math.abs(v) >= 1e6) return v.toLocaleString(undefined, { notation: 'compact', minimumFractionDigits: dp, maximumFractionDigits: dp });
+  return v.toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp });
+};

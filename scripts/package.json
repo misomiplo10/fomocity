@@ -5,7 +5,8 @@
   "scripts": {
     "launch": "tsx launch.ts",
     "keeper": "tsx keeper.ts",
-    "test:localnet": "tsx localnet.test.ts"
+    "test:localnet": "tsx localnet.test.ts",
+    "test:rounds": "tsx rounds.test.ts"
   },
   "dependencies": {
     "@coral-xyz/anchor": "0.31.1",

@@ -5,6 +5,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { City } from './city.js';
 import { Plaza } from './towers.js';
 import { createSim } from './sim.js';
+import { chainConfig } from './config.js';
 import { createUI } from './ui.js';
 import './style.css';
 
@@ -52,7 +53,10 @@ const em = scenePass.getTextureNode('emissive');
 const glow = bloom(em, 0.6, 0.35, 0.05);
 pipeline.outputNode = col.add(glow);
 
-const backend = createSim();
+// ?cluster=localnet|devnet (+ &mint=) or VITE_CLUSTER switches to the chain backend; the
+// Solana libraries are only loaded in that case, so sim mode stays light.
+const cfg = chainConfig();
+const backend = cfg ? await (await import('./solana.js')).createChain(cfg) : createSim();
 const ui = createUI({ backend, camera, renderer, plaza, controls });
 ui.setRenderer(renderer.backend.isWebGPUBackend ? 'WebGPU' : 'WebGL2');
 

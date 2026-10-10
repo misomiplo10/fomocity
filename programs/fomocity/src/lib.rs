@@ -422,6 +422,14 @@ pub mod fomocity {
 
     // ---------- admin ----------
 
+    /// Hand admin rights to another key (e.g. a multisig). Passing `Pubkey::default()`
+    /// renounces them for good: nobody can sign as it, so keeper and buyback limits freeze.
+    pub fn set_authority(ctx: Context<Admin>, new_authority: Pubkey) -> Result<()> {
+        ctx.accounts.game.authority = new_authority;
+        emit!(AuthorityChanged { authority: new_authority });
+        Ok(())
+    }
+
     pub fn set_keeper(ctx: Context<Admin>, keeper: Pubkey) -> Result<()> {
         ctx.accounts.game.buyback.keeper = keeper;
         Ok(())
@@ -986,6 +994,8 @@ pub struct Bought { pub round: u64, pub buyer: Pubkey, pub floors: u32, pub cost
 pub struct Claimed { pub round: u64, pub owner: Pubkey, pub amount: u64 }
 #[event]
 pub struct Settled { pub round: u64, pub winner: Pubkey, pub jackpot: u64, pub carry: u64 }
+#[event]
+pub struct AuthorityChanged { pub authority: Pubkey }
 #[event]
 pub struct Harvested { pub venue: Venue, pub lamports: u64 }
 #[event]

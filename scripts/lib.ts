@@ -31,7 +31,7 @@ export const DAMM_V2_CONFIGS: Record<number, PublicKey> = {
 };
 
 const root = (p: string) => fileURLToPath(new URL(`../${p}`, import.meta.url));
-export const IDL = JSON.parse(readFileSync(root('target/idl/fomocity.json'), 'utf8')) as Idl;
+export const IDL = JSON.parse(readFileSync(root('idls/fomocity.json'), 'utf8')) as Idl;
 export const PROGRAM_ID = new PublicKey(IDL.address);
 
 export function loadKeypair(path: string): Keypair {
@@ -260,7 +260,7 @@ export async function harvestDbcSurplus(program: Program, g: GameState) {
  * while the swap fee is above `maxFeeBps`, so the keeper doesn't buy back during the
  * anti-sniper window and hand 20% of a 50% fee to the protocol.
  */
-export async function buybackDbc(program: Program, keeper: Keypair, g: GameState, lamports: BN, slippageBps = 100, maxFeeBps = 200) {
+export async function buybackDbc(program: Program, keeper: Keypair, g: GameState, lamports: BN, slippageBps = 100, maxFeeBps = 200, sender?: Sender) {
   const connection = program.provider.connection;
   const dbc = new DynamicBondingCurveClient(connection, 'confirmed');
   const pool = await dbc.state.getPool(g.data.dbcPool);
@@ -275,7 +275,7 @@ export async function buybackDbc(program: Program, keeper: Keypair, g: GameState
   const feeBps = quote.tradingFee.add(quote.protocolFee).add(quote.referralFee).muln(10_000).div(lamports).toNumber();
   if (feeBps > maxFeeBps) throw new Error(`swap fee ${feeBps} bps is above ${maxFeeBps}; waiting for it to decay`);
   const minOut = quote.minimumAmountOut!;
-  const sig = await program.methods
+  const builder = program.methods
     .buybackDbc(lamports, minOut)
     .accountsStrict({
       keeper: keeper.publicKey,
@@ -283,8 +283,8 @@ export async function buybackDbc(program: Program, keeper: Keypair, g: GameState
       vault: g.vault,
       ...dbcAccounts(g, pool.poolState),
     })
-    .signers([keeper])
-    .rpc();
+    .signers([keeper]);
+  const sig = sender ? await sender(await builder.transaction()) : await builder.rpc();
   return { sig, minOut, expectedOut: quote.outputAmount };
 }
 
@@ -320,7 +320,7 @@ export async function harvestDamm(program: Program, g: GameState) {
   return sigs;
 }
 
-export async function buybackDamm(program: Program, keeper: Keypair, g: GameState, lamports: BN, slippageBps = 100) {
+export async function buybackDamm(program: Program, keeper: Keypair, g: GameState, lamports: BN, slippageBps = 100, sender?: Sender) {
   const connection = program.provider.connection;
   const cp = new CpAmm(connection);
   const pool = await cp.fetchPoolState(g.data.dammPool);
@@ -332,7 +332,7 @@ export async function buybackDamm(program: Program, keeper: Keypair, g: GameStat
     swapMode: DammSwapMode.ExactIn, amountIn: lamports,
   });
   const minOut = quote.minimumAmountOut!;
-  const sig = await program.methods
+  const builder = program.methods
     .buybackDamm(lamports, minOut)
     .accountsStrict({
       keeper: keeper.publicKey,
@@ -340,9 +340,45 @@ export async function buybackDamm(program: Program, keeper: Keypair, g: GameStat
       vault: g.vault,
       ...dammAccounts(g, pool),
     })
-    .signers([keeper])
-    .rpc();
+    .signers([keeper]);
+  const sig = sender ? await sender(await builder.transaction()) : await builder.rpc();
   return { sig, minOut, expectedOut: quote.outputAmount };
+}
+
+// ---------- private sending (Jito) ----------
+
+export type Sender = (tx: Transaction) => Promise<string>;
+
+/**
+ * Sends a transaction through a Jito block engine instead of the public mempool, so
+ * searchers can't see a buyback before it lands and sandwich it. Adds a tip transfer to
+ * one of Jito's tip accounts (fetched from the block engine). NOT yet tested against a
+ * live block engine; localnet has none.
+ *   baseUrl e.g. https://mainnet.block-engine.jito.wtf
+ */
+export function jitoSender(connection: Connection, payer: Keypair, baseUrl: string, tipLamports: number): Sender {
+  const rpc = async (path: string, method: string, params: unknown[]) => {
+    const res = await fetch(`${baseUrl.replace(/\/$/, '')}${path}`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+    });
+    const body: any = await res.json();
+    if (body.error) throw new Error(`jito ${method}: ${JSON.stringify(body.error)}`);
+    return body.result;
+  };
+  return async (tx) => {
+    const tips: string[] = await rpc('/api/v1/getTipAccounts', 'getTipAccounts', []);
+    const tipTo = new PublicKey(tips[Math.floor(Math.random() * tips.length)]);
+    tx.add(SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: tipTo, lamports: tipLamports }));
+    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+    tx.recentBlockhash = blockhash;
+    tx.feePayer = payer.publicKey;
+    tx.sign(payer);
+    const sig: string = await rpc('/api/v1/transactions', 'sendTransaction', [tx.serialize().toString('base64'), { encoding: 'base64' }]);
+    const conf = await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
+    if (conf.value.err) throw new Error(`buyback failed: ${JSON.stringify(conf.value.err)}`);
+    return sig;
+  };
 }
 
 export async function settle(program: Program, g: GameState, cranker: PublicKey) {

@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  program:
+    name: Program (Rust)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Unit tests (cost, buyback split, DAMM pool PDA)
+        run: cargo test -p fomocity
+      - name: IDL is up to date
+        run: |
+          cargo build --manifest-path tools/idl/Cargo.toml
+          env -u RUSTUP_TOOLCHAIN tools/idl/target/debug/fomocity-idl
+          git diff --exit-code idls/fomocity.json
+
+  web:
+    name: Web client
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npm test
+      - run: npm run build
+
+  scripts:
+    name: Scripts (type-check)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: scripts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: scripts/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npx tsc -p .

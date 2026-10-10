@@ -8,7 +8,7 @@ import { getAccount } from '@solana/spl-token';
 import { Connection, PublicKey } from '@solana/web3.js';
 import BN from 'bn.js';
 import {
-  buybackDamm, buybackDbc, fomocity, harvestDamm, harvestDbc, harvestDbcSurplus, loadKeypair, readGame, send, settle,
+  buybackDamm, buybackDbc, fomocity, jitoSender, harvestDamm, harvestDbc, harvestDbcSurplus, loadKeypair, readGame, send, settle,
 } from './lib.ts';
 
 const env = (k: string, d?: string) => process.env[k] ?? d ?? (() => { throw new Error(`set ${k}`); })();
@@ -19,8 +19,12 @@ const INTERVAL = Number(env('INTERVAL_SECS', '20')) * 1000;
 const MIN_BUYBACK = new BN(env('MIN_BUYBACK_LAMPORTS', '10000000')); // 0.01 SOL: skip dust
 const SLIPPAGE_BPS = Number(env('SLIPPAGE_BPS', '100'));
 const MAX_FEE_BPS = Number(env('MAX_FEE_BPS', '200')); // skip buybacks during the anti-sniper window
+// Optional: route buybacks through Jito so they can't be sandwiched from the public mempool.
+//   JITO_URL=https://mainnet.block-engine.jito.wtf JITO_TIP_LAMPORTS=100000
+const JITO_URL = process.env.JITO_URL;
 
 const program = fomocity(connection, keeper);
+const sender = JITO_URL ? jitoSender(connection, keeper, JITO_URL, Number(env('JITO_TIP_LAMPORTS', '100000'))) : undefined;
 const dbc = new DynamicBondingCurveClient(connection, 'confirmed');
 const log = (...a: unknown[]) => console.log(new Date().toISOString(), ...a);
 const attempt = async (what: string, f: () => Promise<unknown>) => {
@@ -58,11 +62,11 @@ async function tick() {
   if (cooled && wsol.gte(MIN_BUYBACK)) {
     const amount = BN.min(wsol, g.data.buyback.maxLamports);
     await attempt(`buyback ${amount.toString()} lamports`, () =>
-      migrated ? buybackDamm(program, keeper, g, amount, SLIPPAGE_BPS) : buybackDbc(program, keeper, g, amount, SLIPPAGE_BPS, MAX_FEE_BPS));
+      migrated ? buybackDamm(program, keeper, g, amount, SLIPPAGE_BPS, sender) : buybackDbc(program, keeper, g, amount, SLIPPAGE_BPS, MAX_FEE_BPS, sender));
   }
 }
 
-log(`keeper ${keeper.publicKey.toBase58()} watching game for mint ${mint.toBase58()}`);
+log(`keeper ${keeper.publicKey.toBase58()} watching game for mint ${mint.toBase58()}${JITO_URL ? ` (buybacks via Jito ${JITO_URL})` : ''}`);
 for (;;) {
   await attempt('tick', tick);
   await new Promise((r) => setTimeout(r, INTERVAL));

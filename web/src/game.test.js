@@ -25,3 +25,17 @@ test('buyback after the timer ran out seeds the next round only', () => {
   assert.equal(r.jackpot, 700_000);
   assert.equal(r.nextRoundPot, 200_000 + 900_000);
 });
+
+test('dividends match the program (same vectors as scripts/rounds.test.ts)', () => {
+  const p = G.DEFAULT_PARAMS;
+  const r = G.newRound(1, 0, p);
+  G.buy(r, p, 'alice', 4, 1);
+  G.buy(r, p, 'bob', 2, 1);
+  const c2 = G.costOf(p, 4, 2);
+  const div2 = Math.floor((c2 * 3_500) / 10_000);
+  assert.equal(r.accPerFloor, (BigInt(div2) * 1_000_000_000_000n) / 4n);
+  assert.equal(G.pendingDividends(r, 'alice'), Math.floor(div2 / 4) * 4);
+  assert.equal(G.pendingDividends(r, 'bob'), 0);
+  assert.equal(G.claim(r, 'alice'), Math.floor(div2 / 4) * 4);
+  assert.equal(G.pendingDividends(r, 'alice'), 0);
+});
