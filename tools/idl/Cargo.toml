@@ -1,0 +1,12 @@
+[package]
+name = "fomocity-idl"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Standalone: builds the program IDL without the Anchor CLI.
+[workspace]
+
+[dependencies]
+anchor-lang-idl = { version = "0.1.4", features = ["build"] }
+serde_json = "1"

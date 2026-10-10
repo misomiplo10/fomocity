@@ -2,3 +2,4 @@ node_modules/
 dist/
 target/
 .anchor/
+tools/idl/target

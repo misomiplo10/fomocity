@@ -23,6 +23,14 @@ export const DEFAULT_PARAMS = {
   maxFloorsPerBuy: 100,
 };
 
+// Meteora fee flywheel: trading fees (SOL) are harvested by the treasury PDA and swapped
+// for the game token. The output is split like this (jackpot takes the rounding dust).
+export const BUYBACK_SPLIT = {
+  jackpot: 7_000,
+  nextRound: 2_000,
+  burn: 1_000,
+};
+
 const bp = (amount, bps) => Math.floor((amount * bps) / 10_000);
 
 // Cost of buying n floors when `sold` floors already exist.
@@ -113,6 +121,23 @@ export function settle(round, now) {
   round.winner = round.lastBuyer;
   // A round with no buyers carries its jackpot forward untouched.
   return { winner: round.winner, payout: round.winner ? round.jackpot : 0, carry: round.winner ? round.nextRoundPot : round.jackpot + round.nextRoundPot };
+}
+
+// Mirrors split_buyback in lib.rs.
+export function splitBuyback(out) {
+  const toNext = bp(out, BUYBACK_SPLIT.nextRound);
+  const burn = bp(out, BUYBACK_SPLIT.burn);
+  return { toJackpot: out - toNext - burn, toNext, burn };
+}
+
+// Mirrors distribute_buyback in lib.rs: once the timer has run out, the winner is already
+// decided, so the jackpot share goes to the next round instead.
+export function fundFromBuyback(round, out, now) {
+  let { toJackpot, toNext, burn } = splitBuyback(out);
+  if (!isLive(round, now)) { toNext += toJackpot; toJackpot = 0; }
+  round.jackpot += toJackpot;
+  round.nextRoundPot += toNext;
+  return { out, toJackpot, toNext, burn };
 }
 
 export const fmt = (base, dp = 2) =>

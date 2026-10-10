@@ -1,6 +1,7 @@
 // The plaza at the center of the city: every player gets a tower that grows
 // a floor per floor bought. The jackpot obelisk sits in the middle; the last
 // buyer's tower gets a sky beam. Everything resets when a round settles.
+// Meteora buybacks drop a cyan column into the obelisk; migration sends shockwaves out.
 import * as THREE from 'three/webgpu';
 import { Fn, float, vec3, step, fract, positionWorld, positionLocal, normalWorld, abs, uniform, time, sin, smoothstep, mix } from 'three/tsl';
 import { BLOCK, STREET, PLAZA_RADIUS } from './city.js';
@@ -24,6 +25,9 @@ function plotPositions() {
   // inner plots first so early buyers sit next to the jackpot
   return out.sort((a, b) => a.length() - b.length());
 }
+
+const METEORA = vec3(0.26, 0.9, 1.0);
+const METEORA_COLOR = new THREE.Color(0.26, 0.9, 1.0);
 
 const nameHue = (s) => { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) >>> 0; return (h % 360) / 360; };
 
@@ -72,6 +76,16 @@ export class Plaza {
     this.beam.visible = false;
     scene.add(this.beam);
 
+    // Meteora buyback column over the obelisk
+    this.bb = uniform(0);
+    const cm = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
+    cm.colorNode = METEORA.mul(2.5);
+    cm.opacityNode = smoothstep(0.0, 0.08, positionLocal.y).mul(float(1).sub(positionLocal.y)).mul(this.bb).mul(0.8);
+    this.bbBeam = new THREE.Mesh(new THREE.CylinderGeometry(6, 9, 1, 24, 1, true).translate(0, 0.5, 0), cm);
+    this.bbBeam.scale.y = 700;
+    this.bbBeam.visible = false;
+    scene.add(this.bbBeam);
+
     this.boxGeo = new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0);
     this.ringGeo = new THREE.RingGeometry(0.85, 1, 48).rotateX(-Math.PI / 2);
   }
@@ -106,7 +120,19 @@ export class Plaza {
     this.spawnRing(t.mesh.position, t.color);
   }
 
-  spawnRing(pos, color) {
+  // Bigger buybacks flash brighter. `out` is in token base units.
+  onBuyback(out) {
+    this.bb.value = Math.min(1, 0.45 + 0.2 * Math.log10(1 + out / UNIT));
+    this.spawnRing(new THREE.Vector3(), METEORA_COLOR, { speed: 60 });
+  }
+
+  // Curve complete / migrated to DAMM v2: shockwaves across the whole city.
+  onMigration() {
+    this.bb.value = 1;
+    for (let i = 0; i < 4; i++) setTimeout(() => this.spawnRing(new THREE.Vector3(), METEORA_COLOR, { speed: 260, life: 3 }), i * 350);
+  }
+
+  spawnRing(pos, color, { speed = 40, life = 1.2 } = {}) {
     const m = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
     const o = uniform(1);
     m.colorNode = vec3(color.r, color.g, color.b).mul(3);
@@ -114,7 +140,7 @@ export class Plaza {
     const ring = new THREE.Mesh(this.ringGeo, m);
     ring.position.copy(pos).setY(1);
     this.scene.add(ring);
-    this.fx.push({ ring, o, age: 0 });
+    this.fx.push({ ring, o, age: 0, speed, life });
   }
 
   setJackpot(base) {
@@ -144,14 +170,16 @@ export class Plaza {
     if (lb) this.beam.position.copy(lb.mesh.position).setY(lb.h + 0.6);
 
     this.obelisk.scale.y += (this.obeliskH - this.obelisk.scale.y) * (1 - Math.pow(0.05, dt));
+    this.bb.value *= Math.pow(0.3, dt);
+    this.bbBeam.visible = this.bb.value > 0.01;
 
     for (let i = this.fx.length - 1; i >= 0; i--) {
       const f = this.fx[i];
       f.age += dt;
-      const s = 4 + f.age * 40;
+      const s = 4 + f.age * f.speed;
       f.ring.scale.set(s, 1, s);
-      f.o.value = Math.max(0, 1 - f.age / 1.2);
-      if (f.age > 1.2) { this.scene.remove(f.ring); f.ring.material.dispose(); this.fx.splice(i, 1); }
+      f.o.value = Math.max(0, 1 - f.age / f.life);
+      if (f.age > f.life) { this.scene.remove(f.ring); f.ring.material.dispose(); this.fx.splice(i, 1); }
     }
   }
 

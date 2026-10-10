@@ -59,6 +59,8 @@ ui.setRenderer(renderer.backend.isWebGPUBackend ? 'WebGPU' : 'WebGL2');
 backend.on((e) => {
   if (e.type === 'buy') plaza.onBuy(e.who, e.floors, e.who === backend.you);
   if (e.type === 'round') plaza.reset();
+  if (e.type === 'buyback') plaza.onBuyback(e.out);
+  if (e.type === 'curveComplete' || e.type === 'migrated') plaza.onMigration();
 });
 
 addEventListener('resize', () => {

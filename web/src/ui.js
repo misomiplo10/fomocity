@@ -1,5 +1,6 @@
 import * as THREE from 'three/webgpu';
 import * as G from './game.js';
+import { MARKET } from './sim.js';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -22,6 +23,16 @@ export function createUI({ backend, camera, plaza }) {
       <div class="sub"><span id="floors"></span> floors · last buyer <b id="last">—</b></div>
     </div>
     <div id="feed" class="panel"><h3>Live</h3><ul id="feedlist"></ul></div>
+    <div id="market" class="panel">
+      <h3>Meteora <span id="phase"></span></h3>
+      <div class="bar"><i id="curvebar"></i></div>
+      <div class="hint" id="curvetxt"></div>
+      <div class="row"><span>Token price</span><b id="mprice"></b></div>
+      <div class="row"><span>Swap fee</span><b id="mfee"></b></div>
+      <div class="row"><span>Treasury fees</span><b id="mtreasury"></b></div>
+      <div class="row"><span>Bought back</span><b id="mbought"></b></div>
+      <div class="row"><span>Burned</span><b id="mburned"></b></div>
+    </div>
     <div id="side" class="panel">
       <div class="row"><span>Wallet</span><b id="bal"></b></div>
       <div class="row"><span>Next floor</span><b id="price"></b></div>
@@ -51,6 +62,10 @@ export function createUI({ backend, camera, plaza }) {
       <li>When the timer hits zero, the <b>last buyer wins the jackpot</b>. Everyone else's floors are worth nothing; they only earned dividends.</li>
       <li>Every buy is split: <b>${G.SPLIT.jackpot / 100}%</b> jackpot · <b>${G.SPLIT.dividends / 100}%</b> dividends to earlier floor holders · <b>${G.SPLIT.nextRound / 100}%</b> seeds next round · <b>${G.SPLIT.dev / 100}%</b> protocol fee.</li>
       <li>Dividends only come from <i>later</i> buyers. Once buying stops, they stop. Late buyers earn the least.</li>
+      <li>The token trades on <b>Meteora</b>: first on a bonding curve, then, once the curve fills, in a regular pool whose liquidity is <b>locked forever</b>.</li>
+      <li>The game's treasury collects <b>80% of all Meteora trading fees</b> in SOL (Meteora keeps 20%). A keeper buys the token back with it: <b>${G.BUYBACK_SPLIT.jackpot / 100}%</b> to this round's jackpot · <b>${G.BUYBACK_SPLIT.nextRound / 100}%</b> to the next round · <b>${G.BUYBACK_SPLIT.burn / 100}%</b> burned.</li>
+      <li>Launch fees start at <b>${MARKET.sniperFeeBps / 100}%</b> and fall to <b>${MARKET.baseFeeBps / 100}%</b>, so early snipers pay into the pot. Buybacks wait until the fee has dropped.</li>
+      <li>Buybacks can't create a winner: if the timer already hit zero, that buyback goes to the next round.</li>
       <li>All rules run in an open-source on-chain program. Nobody, including the devs, can move the pot.</li>
     </ul>
     <p class="hint">${backend.mode === 'sim' ? 'SIM MODE: fake tokens, bots, 2-minute rounds. Nothing here is real money.' : ''}</p>
@@ -88,6 +103,22 @@ export function createUI({ backend, camera, plaza }) {
         `<li class="${e.who === backend.you ? 'me' : ''}"><b>${esc(short(e.who))}</b> +${e.n} floor${e.n > 1 ? 's' : ''} <span>${G.fmt(e.cost)}</span></li>`);
       while (feed.children.length > 14) feed.lastChild.remove();
     }
+    if (e.type === 'buyback') {
+      feed.insertAdjacentHTML('afterbegin',
+        `<li class="bb"><b>◆ Buyback</b> ${e.sol.toFixed(3)} SOL <span>+${G.fmt(e.toJackpot)}</span></li>`);
+      while (feed.children.length > 14) feed.lastChild.remove();
+    }
+    if (e.type === 'curveComplete' || e.type === 'migrated') {
+      const done = e.type === 'migrated';
+      feed.insertAdjacentHTML('afterbegin', `<li class="bb"><b>◆ ${done ? 'Migrated to DAMM v2' : 'Bonding curve complete'}</b></li>`);
+      const b = $('#banner');
+      b.innerHTML = done
+        ? `<div>GRADUATED</div><big>DAMM v2</big><div>Liquidity locked forever. Its fees keep feeding the pot.</div>`
+        : `<div>BONDING CURVE COMPLETE</div><big>${MARKET.thresholdSol} SOL</big><div>Migrating to a Meteora pool…</div>`;
+      b.className = 'meteora';
+      b.hidden = false;
+      setTimeout(() => (b.hidden = true), 4500);
+    }
     if (e.type === 'settled') {
       const b = $('#banner');
       b.innerHTML = e.winner
@@ -124,6 +155,24 @@ export function createUI({ backend, camera, plaza }) {
       const me = r.players[backend.you];
       $('#mine').textContent = me ? me.floors : 0;
       $('#div').textContent = G.fmt(G.pendingDividends(r, backend.you));
+
+      const m = backend.market;
+      if (m) {
+        const pct = m.phase === 'curve' ? Math.min(100, (m.raisedSol / MARKET.thresholdSol) * 100) : 100;
+        $('#phase').textContent = { curve: 'bonding curve', migrating: 'migrating…', damm: 'DAMM v2' }[m.phase];
+        $('#phase').className = m.phase;
+        $('#curvebar').style.width = `${pct}%`;
+        $('#curvetxt').textContent = m.phase === 'curve'
+          ? `${m.raisedSol.toFixed(2)} / ${MARKET.thresholdSol} SOL raised`
+          : `Graduated · ${m.volumeSol.toFixed(1)} SOL traded`;
+        $('#mprice').textContent = `${m.price.toFixed(5)} SOL`;
+        const fee = $('#mfee');
+        fee.textContent = `${(m.feeBps / 100).toFixed(m.feeBps < 1000 ? 2 : 1)}%`;
+        fee.className = m.feeBps > MARKET.keeperMaxFeeBps ? 'hot' : '';
+        $('#mtreasury').textContent = `${(m.unclaimedSol + m.wsolSol).toFixed(4)} SOL`;
+        $('#mbought').textContent = G.fmt(m.boughtTokens);
+        $('#mburned').textContent = G.fmt(m.burnedTokens);
+      }
 
       const anchors = plaza.labelAnchors();
       const lead = anchors.slice(0, 5).map((a) => `<li class="${a.who === backend.you ? 'me' : ''}">${esc(short(a.who))} <span>${a.floors}</span></li>`).join('');
