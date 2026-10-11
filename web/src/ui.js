@@ -225,7 +225,7 @@ export function createUI({ backend, camera, plaza }) {
         $('#curvetxt').textContent = m.phase === 'curve'
           ? `${m.raisedSol.toFixed(2)} / ${MI.thresholdSol} SOL raised`
           : m.volumeSol ? `Graduated · ${m.volumeSol.toFixed(1)} SOL traded` : 'Graduated';
-        $('#mprice').textContent = m.price >= 0.001 ? `${m.price.toFixed(5)} SOL` : `${(m.price * 1e6).toPrecision(3)} SOL / 1M`;
+        $('#mprice').textContent = m.price >= 1e-6 ? `${m.price.toPrecision(3)} SOL` : `${(m.price * 1e6).toPrecision(3)} SOL / 1M`;
         const fee = $('#mfee');
         fee.textContent = `${(m.feeBps / 100).toFixed(m.feeBps < 1000 ? 2 : 1)}%`;
         fee.className = m.feeBps > MI.keeperMaxFeeBps ? 'hot' : '';
