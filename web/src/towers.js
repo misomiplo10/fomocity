@@ -1,5 +1,5 @@
-// The plaza at the center of the city: every player gets a tower that grows
-// a floor per floor bought. The jackpot obelisk sits in the middle; the last
+// The plaza at the center of the city: every buyer gets a tower that grows with the SOL
+// they've bought this round. The jackpot obelisk sits in the middle; the last
 // buyer's tower gets a sky beam. Everything resets when a round settles.
 // Meteora buybacks drop a cyan column into the obelisk; migration sends shockwaves out.
 import * as THREE from 'three/webgpu';
@@ -11,7 +11,8 @@ const PLAZA_HALF = (PLAZA_RADIUS + 0.5) * BLOCK - STREET / 2;
 const PLOT = 13;
 const FLOOR_H = 2.4;
 
-export const towerHeight = (floors) => 6 + 24 * Math.log2(1 + floors);
+// Height from SOL bought this round: 0.05 SOL ≈ 25, 1 SOL ≈ 110, 10 SOL ≈ 190.
+export const towerHeight = (lamports) => 6 + 24 * Math.log2(1 + (lamports / 1e9) * 20);
 
 function plotPositions() {
   const out = [];
@@ -105,16 +106,16 @@ export class Plaza {
     mesh.position.copy(plot).setY(0.6);
     mesh.scale.set(8, 0.01, 8);
     this.group.add(mesh);
-    const t = { who, mesh, glow, color, floors: 0, h: 0.01, target: 0.01 };
+    const t = { who, mesh, glow, color, lamports: 0, h: 0.01, target: 0.01 };
     this.towers.set(who, t);
     return t;
   }
 
-  onBuy(who, floors, isYou) {
+  onBuy(who, lamports) {
     let t = this.towers.get(who);
-    if (!t) t = this.makeTower(who, isYou ? new THREE.Color(0.2, 1.0, 0.6) : new THREE.Color().setHSL(nameHue(who), 0.85, 0.55));
-    t.floors = floors;
-    t.target = towerHeight(floors);
+    if (!t) t = this.makeTower(who, new THREE.Color().setHSL(nameHue(who), 0.85, 0.55));
+    t.lamports = lamports;
+    t.target = towerHeight(lamports);
     t.glow.value = 1;
     this.lastBuyer = t;
     this.spawnRing(t.mesh.position, t.color);
@@ -183,12 +184,12 @@ export class Plaza {
     }
   }
 
-  // Top towers by floors, for HTML name labels.
+  // Top towers by SOL bought, for HTML name labels and the leaderboard.
   labelAnchors(n = 12) {
     return [...this.towers.values()]
       .filter((t) => !t.collapsing)
-      .sort((a, b) => b.floors - a.floors)
+      .sort((a, b) => b.lamports - a.lamports)
       .slice(0, n)
-      .map((t) => ({ who: t.who, floors: t.floors, pos: t.mesh.position.clone().setY(t.h + 4) }));
+      .map((t) => ({ who: t.who, lamports: t.lamports, pos: t.mesh.position.clone().setY(t.h + 4) }));
   }
 }

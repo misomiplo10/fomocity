@@ -21,5 +21,5 @@ export function chainConfig(search = location.search) {
   const rpcUrl = pick('rpc', 'VITE_RPC_URL') || DEFAULT_RPC[cluster];
   const mint = pick('mint', 'VITE_MINT');
   if (!mint) throw new Error('no game mint configured (?mint= or VITE_MINT)');
-  return { cluster, rpcUrl, mint, burnerAllowed: cluster === 'localnet' };
+  return { cluster, rpcUrl, mint };
 }

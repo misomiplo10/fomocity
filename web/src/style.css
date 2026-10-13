@@ -81,14 +81,42 @@ dialog li { margin-bottom: 6px; }
 
 /* Mid widths: keep the countdown clear of the two side panels. */
 @media (max-width: 1100px) and (min-width: 721px) {
-  #feed, #market, #side { width: 210px; }
+  #feed, #market, #side, #cabox { width: 210px; }
   #timer { font-size: clamp(36px, calc((100vw - 500px) / 6.5), 84px); }
 }
 
 @media (max-width: 720px) {
   #feed, #market { display: none; }
+  #cabox { top: 46px; bottom: auto; left: 16px; right: 16px; width: auto; padding: 8px 10px; }
+  #cabox h3 { display: none; }
   #side { top: auto; bottom: 16px; right: 16px; left: 16px; width: auto; }
   #side hr, #side h3, #lead, #side .row:nth-child(-n+2) { display: none; }
   #badges { bottom: auto; top: 16px; }
-  #top { top: 50px; }
+  #top { top: 104px; }
 }
+
+/* Watch-only HUD additions */
+#badges a.guide { pointer-events: auto; color: var(--meteora); border: 1px solid var(--line); border-radius: 5px; padding: 3px 7px; background: var(--panel); text-decoration: none; }
+#hud a { color: inherit; text-decoration: none; pointer-events: auto; }
+#hud a:hover { text-decoration: underline; }
+dialog a { color: var(--meteora); }
+#side .how { margin: 0 0 8px; font-size: 12px; line-height: 1.5; color: var(--dim); }
+#side .how b { color: var(--fg); }
+/* Bottom-right: the token's contract address once it's launched */
+#cabox { right: 16px; bottom: 16px; width: 250px; }
+#cabox .ca { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+#cabox .ca code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--fg); background: rgba(255,255,255,.06); border-radius: 6px; padding: 7px 8px; }
+#cabox .ca.soon code { color: var(--gold); text-align: center; letter-spacing: .08em; }
+#cabox .ca button { font-size: 11px; padding: 6px 8px; }
+#cabox a.ext { display: block; text-align: center; font-size: 12px; color: var(--meteora); border: 1px solid var(--meteora); border-radius: 7px; padding: 6px; }
+#feed li { display: flex; justify-content: space-between; gap: 8px; }
+#feed li b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#feed li span { float: none; white-space: nowrap; }
+#winners, #lead { list-style: none; margin: 0; padding: 0; font-size: 12px; }
+#winners li { display: grid; grid-template-columns: auto 1fr auto; gap: 6px; padding: 3px 0; border-bottom: 1px solid var(--line); }
+#winners li small { grid-column: 2 / 4; color: var(--dim); font-size: 10px; margin-top: -2px; }
+#winners li span { color: var(--gold); }
+#winners li span.r { color: var(--dim); }
+#winners li.dim, #lead li.dim { display: block; color: var(--dim); border: 0; }
+#feed li.win b { color: var(--gold); }
+#timer.settling { font-size: clamp(28px, 5vw, 56px); color: var(--gold); animation: pulse .6s infinite alternate; }

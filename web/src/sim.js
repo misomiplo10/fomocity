@@ -1,7 +1,9 @@
-// Local simulator backend: same interface the Solana backend will expose.
-// Bots buy floors at random and get more aggressive as the timer runs low (snipers).
-// A simulated Meteora market runs alongside: bots trade the token on the bonding curve,
-// 80% of every trading fee goes to the treasury, and a keeper harvests and buys back.
+// Local simulator backend: same interface as the Solana backend (solana.js).
+// Bots trade the token on a simulated Meteora market. Every bot buy of at least the
+// minimum counts as a game move (exactly like a real Jupiter/Meteora buy reported by the
+// keeper): it adds time to the countdown and makes that bot the last buyer. Trading comes
+// in waves, so calm spells let rounds end, and snipers pile in near zero. 80% of every
+// trading fee goes to the treasury, and a keeper harvests and buys back into the jackpot.
 import * as G from './game.js';
 
 const BOT_NAMES = [
@@ -27,15 +29,14 @@ export const MARKET = {
   migrationSecs: 5,
 };
 
-export function createSim({ you = 'you', startBalance = 1_000 * G.UNIT } = {}) {
-  // Short timers so a round plays out in a few minutes instead of a day.
-  const params = { ...G.DEFAULT_PARAMS, initialTimer: 120, maxTimer: 180, timeAddPerFloor: 8 };
+export function createSim() {
+  // Short timers so a round plays out in a couple of minutes instead of half an hour.
+  const params = { ...G.DEFAULT_PARAMS, initialTimer: 90, maxTimer: 90, timeAddPerBuy: 10, settleGraceSecs: 3 };
   const listeners = new Set();
   const history = [];
+  const winners = []; // newest first: { round, wallet, amount, ts }
   let roundId = 1;
   let round = G.newRound(roundId, now(), params);
-  const balances = { [you]: startBalance };
-  let devTotal = 0;
 
   const launchTs = now();
   const market = {
@@ -72,8 +73,12 @@ export function createSim({ you = 'you', startBalance = 1_000 * G.UNIT } = {}) {
     return s * s;
   }
 
-  function trade(sol, t) {
+  function trade(sol, t, who = null) {
     if (market.phase === 'migrating') return; // pool closed while liquidity moves
+    // A player's buy is a game move if it's big enough (the game's own buybacks pass no `who`).
+    if (who && sol > 0 && G.recordBuy(round, params, who, Math.round(sol * G.LAMPORTS), t)) {
+      emit({ type: 'buy', who, lamports: Math.round(sol * G.LAMPORTS), total: round.buyers[who] });
+    }
     const fee = Math.abs(sol) * market.feeBps / 10_000;
     market.unclaimedSol += fee * MARKET.treasuryShareBps / 10_000;
     market.volumeSol += Math.abs(sol);
@@ -119,69 +124,44 @@ export function createSim({ you = 'you', startBalance = 1_000 * G.UNIT } = {}) {
     }
   }
 
-  function doBuy(who, n) {
-    const cost = G.costOf(params, round.totalFloors, n);
-    if ((balances[who] ?? Infinity) < cost) throw new Error('insufficient balance');
-    const r = G.buy(round, params, who, n, now());
-    if (who in balances) balances[who] -= cost;
-    emit({ type: 'buy', ...r, totalFloors: round.totalFloors, floors: round.players[who].floors });
-    return r;
-  }
-
   function tick() {
     const t = now();
     market.feeBps = feeBpsAt(t);
-    // Market bots: mostly buys while the curve is filling, two-way flow after.
-    if (Math.random() < 0.12) {
-      const size = 0.02 + Math.random() ** 2 * 0.4;
-      const sellBias = market.phase === 'curve' ? 0.25 : 0.48;
-      trade(Math.random() < sellBias ? -size : size, t);
-    }
-    keeper(t);
 
-    if (t >= round.endTs) {
-      const res = G.settle(round, t);
-      if (res.winner && res.winner in balances) balances[res.winner] += res.payout;
-      devTotal += round.devFees;
-      history.unshift({ id: round.id, winner: res.winner, payout: res.payout, floors: round.totalFloors });
+    if (G.canSettle(round, params, t)) {
+      const res = G.settle(round, params, t);
+      history.unshift({ id: round.id, winner: res.winner, payout: res.payout, buys: round.buyCount });
+      if (res.winner) winners.unshift({ round: round.id, wallet: res.winner, amount: res.payout, ts: t });
+      if (winners.length > 10) winners.pop();
       emit({ type: 'settled', round: round.id, ...res });
-      // Unclaimed dividends from the old round are auto-credited to the player in the sim.
-      const pend = G.pendingDividends(round, you);
-      if (pend > 0) { G.claim(round, you); balances[you] += pend; }
-      round = G.newRound(++roundId, t + 6, params, res.carry); // 6s intermission
-      round.endTs = t + 6 + params.initialTimer;
+      round = G.newRound(++roundId, t, params, res.carry);
       emit({ type: 'round', round: round.id });
-      return;
     }
-    if (t < round.startTs) return;
+
+    // Trading comes in waves (about 2.5 minutes per cycle): busy spells keep the clock
+    // topped up, calm spells let it run out. Snipers pile in during the last seconds.
+    const heat = 0.5 + 0.5 * Math.cos(((t - launchTs) / 150) * 2 * Math.PI); // starts busy
     const left = round.endTs - t;
-    // Buy probability per tick (4 Hz): slow mid-round, frantic in the last 15s.
-    const p = left < 15 ? 0.09 : left < 40 ? 0.05 : 0.025;
-    if (Math.random() < p) {
+    const pBuy = 0.012 + 0.09 * heat ** 3 + (left > 0 && left < 8 ? 0.04 : 0);
+    if (Math.random() < pBuy) {
       const who = BOT_NAMES[(Math.random() * BOT_NAMES.length) | 0];
-      const whale = Math.random() < 0.08;
-      const n = whale ? 10 + ((Math.random() * 40) | 0) : 1 + ((Math.random() ** 3 * 8) | 0);
-      try { doBuy(who, n); } catch {}
+      const whale = Math.random() < 0.06;
+      trade(whale ? 0.5 + Math.random() * 1.5 : 0.02 + Math.random() ** 2 * 0.35, t, who);
     }
+    // Sellers (never game moves).
+    if (Math.random() < (market.phase === 'curve' ? 0.02 : 0.05)) trade(-(0.02 + Math.random() ** 2 * 0.3), t);
+    keeper(t);
   }
   setInterval(tick, 250);
 
   return {
     mode: 'sim',
-    you,
     params,
     get round() { return round; },
     get history() { return history; },
+    get winners() { return winners; },
     get market() { return market; },
     now,
-    balance: () => balances[you],
     on(fn) { listeners.add(fn); return () => listeners.delete(fn); },
-    async buy(n) { return doBuy(you, n); },
-    async claim() {
-      const amt = G.claim(round, you);
-      balances[you] += amt;
-      emit({ type: 'claim', who: you, amount: amt });
-      return amt;
-    },
   };
 }

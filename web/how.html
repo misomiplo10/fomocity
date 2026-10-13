@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>How FOMO City works</title>
+    <meta name="description" content="How FOMO City works: buy FOMO anywhere, every buy adds time, the last buyer when the clock hits zero wins the jackpot, paid automatically." />
+    <link rel="icon" type="image/png" href="/logo.png" />
+    <meta property="og:title" content="How FOMO City works" />
+    <meta property="og:image" content="/banner.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+  </head>
+  <body>
+    <header class="hero">
+      <a class="back" href="/">← Back to the city</a>
+      <img src="/logo.png" alt="" width="96" height="96" />
+      <h1>How FOMO City works</h1>
+      <p class="lede">Buy FOMO anywhere. Every buy adds time to the clock. Whoever bought last when it hits zero wins the jackpot, sent to their wallet automatically.</p>
+    </header>
+
+    <main>
+      <section class="warn">
+        <strong>Read this first.</strong> FOMO City is a last-buyer-wins game. Only one wallet wins each round, and
+        everyone else gets nothing from it. <strong>Most players lose money.</strong> Only spend what you can afford to lose
+        entirely. Nothing here is investment advice.
+      </section>
+
+      <section>
+        <h2>How to play</h2>
+        <ol class="steps">
+          <li><b>Buy FOMO</b> with SOL on any app: Jupiter, Meteora, a wallet's swap screen, a trading bot. There's nothing to buy on this website.</li>
+          <li><b>Buy at least <span data-p="minBuy"></span></b> for it to count. Smaller buys and all sells are ignored.</li>
+          <li><b>Every counted buy adds <span data-p="timeAdd"></span></b> to the countdown and makes you the last buyer. The clock never shows more than <span data-p="maxTimer"></span>.</li>
+          <li><b>When the clock hits zero, the last buyer wins the whole jackpot.</b> It's sent straight to their wallet. There's nothing to claim.</li>
+          <li><b>A new round starts</b> right away, with its own fresh countdown.</li>
+        </ol>
+        <p>Watch the city to follow along: every buyer gets a tower that grows with how much they've bought this round, the gold obelisk grows with the jackpot, a beam of light marks the last buyer, and the plaza turns red as the clock runs out.</p>
+      </section>
+
+      <section>
+        <h2>The rules</h2>
+        <ul class="rules">
+          <li>A buy counts when it puts at least <b data-p="minBuy"></b> into FOMO's Meteora pool, from any app or aggregator. Sells never count.</li>
+          <li>Each counted buy adds <b data-p="timeAdd"></b> to the countdown, which is capped at <b data-p="maxTimer"></b>. A round lasts <b data-p="maxTimer"></b> if nobody buys, and keeps going as long as people keep buying.</li>
+          <li>When the countdown reaches zero, the <b>last counted buyer wins the entire jackpot</b>.</li>
+          <li>The jackpot is paid <b>automatically</b> to the winner's wallet in the same on-chain step that ends the round.</li>
+          <li>Buys that land after zero don't count for that round. There's a short <b data-p="grace"></b> window after zero so buys made just before it are still recorded before the round closes.</li>
+          <li>Buys are ordered by when they happened on-chain. Buys in the same second are ordered as the game's keeper sees them.</li>
+          <li>The game's own buybacks never count as a player buy.</li>
+          <li>A round with no counted buys carries its whole jackpot into the next round.</li>
+          <li>Recent winners, with the amount they won, are listed on the main page and stored on-chain.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Where the jackpot comes from</h2>
+        <p>Every trade of FOMO, buy or sell, pays a fee on Meteora. The game's treasury collects <b>80% of all those fees</b> in SOL (Meteora keeps 20%). A keeper regularly uses that SOL to buy FOMO back, and splits what it buys:</p>
+        <div class="split">
+          <div><big data-s="jackpot"></big><span>this round's jackpot</span></div>
+          <div><big data-s="nextRound"></big><span>next round's jackpot</span></div>
+          <div><big data-s="burn"></big><span>burned forever</span></div>
+        </div>
+        <p>So the jackpot grows with trading, whether or not anyone is playing a round. Buybacks wait until the swap fee is low, and a buyback that lands after the clock hit zero goes to the next round, so it can never change who wins.</p>
+      </section>
+
+      <section>
+        <h2>The token</h2>
+        <ul>
+          <li><b>Launch on a bonding curve.</b> FOMO launches on Meteora's Dynamic Bonding Curve. The price starts low and rises automatically as people buy.</li>
+          <li><b>Snipers pay the pot.</b> The trading fee starts at 50% and falls to 1% over the first two minutes. Bots that rush the launch pay heavy fees, and those fees feed the jackpot.</li>
+          <li><b>Graduation.</b> When the curve has raised its target, FOMO moves to a regular Meteora pool. All of its liquidity is <b>locked forever</b>: nobody, including the team, can pull it. The game keeps earning that pool's fees for the jackpot.</li>
+          <li><b>No team allocation.</b> No presale, no team tokens, no vesting. Nobody can mint more FOMO.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>What you can check, and what you trust</h2>
+        <p>The game runs as an open-source Solana program. Everything below is public on-chain:</p>
+        <ul>
+          <li>Every counted buy is recorded with the wallet, the SOL amount, the time and <b>the swap's transaction signature</b>, so anyone can match it to the real trade.</li>
+          <li>The countdown, the last buyer, the jackpot and every payout live in the program's accounts.</li>
+          <li>The jackpot can only be paid to the round's last recorded buyer, and only once.</li>
+        </ul>
+        <p>There are trust points, and you should know them:</p>
+        <ul>
+          <li><b>The keeper reports buys.</b> The program can't see trades made in other apps, so the game's keeper watches Meteora and reports each qualifying buy. It could miss or delay one. Every report is public, so a missing buy is visible to anyone who checks.</li>
+          <li><b>Meteora can pause the pool</b> after graduation. That would stop buybacks until it resumes; it can't touch the jackpot or the locked liquidity.</li>
+          <li><b>Program upgrades.</b> Until the program's upgrade authority is revoked, the team could change the program. The goal is to revoke it after launch, and that will be announced and checkable on-chain.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>FAQ</h2>
+        <details><summary>Do I need to connect my wallet here?</summary><p>No. This site only shows the game. You play by buying FOMO wherever you like, and winnings go straight to the wallet that bought.</p></details>
+        <details><summary>Does selling remove me as the last buyer?</summary><p>No. Sells are ignored. Only counted buys change the last buyer.</p></details>
+        <details><summary>Does buying more in one go help?</summary><p>Not for winning: any counted buy makes you the last buyer and adds the same time. Bigger buys only make your tower taller.</p></details>
+        <details><summary>What if two people buy in the same second?</summary><p>The game follows the order the trades landed on-chain. At the very end of a round, expect bots competing for the final second.</p></details>
+        <details><summary>When is the jackpot paid?</summary><p>A few seconds after the clock hits zero, once the short grace window has passed. It's sent to the winning wallet automatically.</p></details>
+        <details><summary>Is this gambling?</summary><p>It's a game of chance with real money at stake. Check whether it's allowed where you live before playing.</p></details>
+      </section>
+    </main>
+
+    <footer><a href="/">← Back to the city</a></footer>
+    <script type="module" src="/src/how.js"></script>
+  </body>
+</html>

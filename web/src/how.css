@@ -1,0 +1,39 @@
+:root {
+  --fg: #e8ecff; --dim: #9aa2c4; --bg: #05060f; --panel: #0b0e22; --line: rgba(120, 140, 255, 0.18);
+  --gold: #ffc44d; --hot: #ff3b3b; --meteora: #43e6ff;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--fg); }
+body { font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif; }
+a { color: var(--meteora); }
+.hero {
+  text-align: center; padding: 56px 16px 40px;
+  background: linear-gradient(rgba(5, 6, 15, 0.82), var(--bg)), url('/banner.png') center / cover no-repeat;
+}
+.hero img { border-radius: 18px; border: 1px solid var(--line); }
+.hero h1 { font-size: clamp(30px, 6vw, 52px); margin: 14px 0 8px; color: var(--gold); letter-spacing: 0.02em; }
+.lede { max-width: 640px; margin: 0 auto; font-size: 18px; }
+.back { position: absolute; left: 16px; top: 16px; font-size: 14px; text-decoration: none; }
+main { max-width: 760px; margin: 0 auto; padding: 0 16px 48px; }
+section { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 20px 24px; margin: 18px 0; }
+h2 { margin: 0 0 10px; font-size: 22px; color: var(--gold); }
+ul, ol { padding-left: 22px; }
+li { margin: 6px 0; }
+b, strong { color: #fff; }
+.warn { border-color: var(--hot); background: rgba(255, 59, 59, 0.08); }
+.steps li::marker { color: var(--gold); font-weight: 700; }
+.split { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 14px 0; }
+.split div { text-align: center; border: 1px solid var(--line); border-radius: 10px; padding: 12px 6px; }
+.split big { display: block; font-size: 30px; font-weight: 800; color: var(--meteora); }
+.split span { color: var(--dim); font-size: 13px; }
+details { border-top: 1px solid var(--line); padding: 10px 0; }
+details:first-of-type { border-top: 0; }
+summary { cursor: pointer; font-weight: 600; }
+details p { margin: 8px 0 0; color: var(--dim); }
+footer { text-align: center; padding: 0 16px 40px; }
+@media (max-width: 520px) {
+  section { padding: 16px; }
+  .split { grid-template-columns: 1fr; }
+  .back { position: static; display: block; margin-bottom: 12px; }
+}

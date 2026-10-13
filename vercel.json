@@ -3,5 +3,6 @@
   "framework": "vite",
   "installCommand": "npm ci --prefix web --ignore-scripts",
   "buildCommand": "npm run build --prefix web",
-  "outputDirectory": "web/dist"
+  "outputDirectory": "web/dist",
+  "cleanUrls": true
 }

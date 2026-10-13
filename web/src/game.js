@@ -1,28 +1,21 @@
-// Pure game engine. Mirrors programs/fomocity/src/lib.rs exactly:
-// same params, same split, same dividend accumulator math. All amounts are
-// integer base units of the game token (6 decimals), so JS math matches Rust u64.
+// Pure game engine. Mirrors programs/fomocity/src/lib.rs exactly: same params, same
+// countdown math, same buyback split. Token amounts are integer base units (6 decimals)
+// and SOL amounts are lamports, so JS math matches the program's u64s.
+//
+// Playing = buying the game token anywhere. Each qualifying buy (at least
+// `minBuyLamports` of SOL into the pool) adds time to the countdown; when it runs out, the
+// last buyer is paid the whole jackpot automatically.
 
 export const DECIMALS = 6;
 export const UNIT = 10 ** DECIMALS;
-// 1e12, scales the per-floor dividend accumulator. The accumulator is a BigInt because
-// it passes 2^53 almost immediately (dividends × 1e12); lib.rs keeps it in a u128.
-export const ACC_PRECISION = 1_000_000_000_000n;
-
-// Basis points; must sum to 10_000.
-export const SPLIT = {
-  jackpot: 5_000,   // to the last buyer when the timer hits zero
-  dividends: 3_500, // to everyone who already holds floors this round
-  nextRound: 1_000, // seeds the next round's jackpot
-  dev: 500,         // protocol fee
-};
+export const LAMPORTS = 1_000_000_000;
 
 export const DEFAULT_PARAMS = {
-  basePrice: 1 * UNIT,       // price of floor #1
-  priceStep: UNIT / 100,     // each floor sold raises the next floor's price by 0.01
-  timeAddPerFloor: 30,       // seconds added to the timer per floor bought
-  maxTimer: 24 * 3600,       // timer can never exceed this from "now"
-  initialTimer: 24 * 3600,   // timer length when a round opens
-  maxFloorsPerBuy: 100,
+  minBuyLamports: 0.05 * LAMPORTS, // smallest buy that counts
+  timeAddPerBuy: 30,               // seconds each counted buy adds
+  maxTimer: 30 * 60,               // the countdown never shows more than this
+  initialTimer: 30 * 60,           // countdown when a round opens
+  settleGraceSecs: 60,             // wait after zero for late-reported buys
 };
 
 // Meteora fee flywheel: trading fees (SOL) are harvested by the treasury PDA and swapped
@@ -35,30 +28,20 @@ export const BUYBACK_SPLIT = {
 
 const bp = (amount, bps) => Math.floor((amount * bps) / 10_000);
 
-// Cost of buying n floors when `sold` floors already exist.
-// Linear bonding curve: price(k) = base + step * k, summed for k = sold..sold+n-1.
-export function costOf(params, sold, n) {
-  return n * params.basePrice + params.priceStep * (n * sold + (n * (n - 1)) / 2);
-}
-
-export function priceOfNext(params, sold) {
-  return params.basePrice + params.priceStep * sold;
-}
-
 export function newRound(id, now, params, seedJackpot = 0) {
   return {
     id,
     startTs: now,
     endTs: now + params.initialTimer,
-    totalFloors: 0,
+    buyCount: 0,
+    totalLamports: 0,
     jackpot: seedJackpot,
     nextRoundPot: 0,
-    devFees: 0,
-    accPerFloor: 0n, // BigInt, scaled by ACC_PRECISION
     lastBuyer: null,
+    lastBuyTs: 0,
     settled: false,
     winner: null,
-    players: {}, // pubkey -> { floors, rewardDebt, claimed }
+    buyers: {}, // wallet -> lamports bought this round (for the towers)
   };
 }
 
@@ -66,63 +49,32 @@ export function isLive(round, now) {
   return !round.settled && now < round.endTs;
 }
 
-export function pendingDividends(round, who) {
-  const p = round.players[who];
-  if (!p) return 0;
-  return Number((BigInt(p.floors) * round.accPerFloor) / ACC_PRECISION) - p.rewardDebt;
+// Mirrors record_buy. Returns false (and changes nothing) for buys that don't count.
+export function recordBuy(round, params, wallet, lamports, ts) {
+  if (round.settled || lamports < params.minBuyLamports) return false;
+  if (ts < round.startTs || ts >= round.endTs || ts < round.lastBuyTs) return false;
+  round.endTs = Math.min(round.endTs + params.timeAddPerBuy, ts + params.maxTimer);
+  round.lastBuyer = wallet;
+  round.lastBuyTs = ts;
+  round.buyCount += 1;
+  round.totalLamports += lamports;
+  round.buyers[wallet] = (round.buyers[wallet] ?? 0) + lamports;
+  return true;
 }
 
-// Returns a receipt describing exactly where the money went.
-export function buy(round, params, who, n, now) {
-  if (!isLive(round, now)) throw new Error('round is over');
-  if (!Number.isInteger(n) || n < 1 || n > params.maxFloorsPerBuy) throw new Error('bad floor count');
+export const canSettle = (round, params, now) => !round.settled && now >= round.endTs + params.settleGraceSecs;
 
-  const cost = costOf(params, round.totalFloors, n);
-  const toDividends = bp(cost, SPLIT.dividends);
-  const toNext = bp(cost, SPLIT.nextRound);
-  const toDev = bp(cost, SPLIT.dev);
-  let toJackpot = cost - toDividends - toNext - toDev; // remainder avoids rounding dust
-
-  // Dividends go to floors that existed *before* this buy. First buyer of a
-  // round has nobody to pay, so that slice rolls into the jackpot.
-  if (round.totalFloors > 0) {
-    round.accPerFloor += (BigInt(toDividends) * ACC_PRECISION) / BigInt(round.totalFloors);
-  } else {
-    toJackpot += toDividends;
-  }
-
-  round.jackpot += toJackpot;
-  round.nextRoundPot += toNext;
-  round.devFees += toDev;
-
-  const p = (round.players[who] ??= { floors: 0, rewardDebt: 0, claimed: 0 });
-  p.floors += n;
-  // New floors start with zero accrued dividends.
-  p.rewardDebt += Number((BigInt(n) * round.accPerFloor) / ACC_PRECISION);
-  round.totalFloors += n;
-  round.lastBuyer = who;
-  round.endTs = Math.min(round.endTs + n * params.timeAddPerFloor, now + params.maxTimer);
-
-  return { who, n, cost, toJackpot, toDividends, toNext, toDev, ts: now };
-}
-
-export function claim(round, who) {
-  const amount = pendingDividends(round, who);
-  const p = round.players[who];
-  if (!p || amount <= 0) return 0;
-  p.rewardDebt += amount;
-  p.claimed += amount;
-  return amount;
-}
-
-// Anyone can call once the timer is past zero. Returns the payout.
-export function settle(round, now) {
+// Mirrors settle: the last buyer is paid the jackpot; a round with no buys carries it over.
+export function settle(round, params, now) {
   if (round.settled) throw new Error('already settled');
-  if (now < round.endTs) throw new Error('timer still running');
+  if (!canSettle(round, params, now)) throw new Error('timer still running');
   round.settled = true;
-  round.winner = round.lastBuyer;
-  // A round with no buyers carries its jackpot forward untouched.
-  return { winner: round.winner, payout: round.winner ? round.jackpot : 0, carry: round.winner ? round.nextRoundPot : round.jackpot + round.nextRoundPot };
+  const hasWinner = round.buyCount > 0;
+  round.winner = hasWinner ? round.lastBuyer : null;
+  const payout = hasWinner ? round.jackpot : 0;
+  const carry = hasWinner ? round.nextRoundPot : round.jackpot + round.nextRoundPot;
+  if (!hasWinner) round.jackpot = 0;
+  return { winner: round.winner, payout, carry };
 }
 
 // Mirrors split_buyback in lib.rs.
@@ -142,10 +94,12 @@ export function fundFromBuyback(round, out, now) {
   return { out, toJackpot, toNext, burn };
 }
 
-// Token amounts for display. Real launches price floors in millions of FOMO, so large
-// values switch to compact notation (3.20M).
+// Token amounts for display. Real launches deal in millions of tokens, so large values
+// switch to compact notation (3.20M).
 export const fmt = (base, dp = 2) => {
   const v = base / UNIT;
   if (Math.abs(v) >= 1e6) return v.toLocaleString(undefined, { notation: 'compact', minimumFractionDigits: dp, maximumFractionDigits: dp });
   return v.toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp });
 };
+
+export const fmtSol = (lamports, dp = 3) => `${(lamports / LAMPORTS).toFixed(dp)} SOL`;

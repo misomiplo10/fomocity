@@ -61,7 +61,7 @@ const ui = createUI({ backend, camera, renderer, plaza, controls });
 ui.setRenderer(renderer.backend.isWebGPUBackend ? 'WebGPU' : 'WebGL2');
 
 backend.on((e) => {
-  if (e.type === 'buy') plaza.onBuy(e.who, e.floors, e.who === backend.you);
+  if (e.type === 'buy') plaza.onBuy(e.who, e.total);
   if (e.type === 'round') plaza.reset();
   if (e.type === 'buyback') plaza.onBuyback(e.out);
   if (e.type === 'curveComplete' || e.type === 'migrated') plaza.onMigration();
@@ -80,7 +80,7 @@ renderer.setAnimationLoop(() => {
   city.update(controls.target);
   const r = backend.round;
   const left = Math.max(0, r.endTs - backend.now());
-  plaza.setTension(r.totalFloors > 0 ? Math.max(0, 1 - left / 30) : 0);
+  plaza.setTension(r.buyCount > 0 ? Math.max(0, 1 - left / 30) : 0);
   plaza.setJackpot(r.jackpot);
   plaza.update(dt);
   ui.frame();
