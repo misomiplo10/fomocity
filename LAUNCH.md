@@ -1,0 +1,82 @@
+# FOMO City launch settings
+
+Every setting the mainnet launch uses: what Meteora's Dynamic Bonding Curve (DBC) is
+configured with, what the game is configured with, and which ones are yours to change.
+Defaults live in `scripts/lib.ts` (`DEFAULT_LAUNCH`, `launchCurve`) and `scripts/launch.ts`.
+Run `npm run launch` without `CONFIRM_MAINNET=yes` to print the exact plan before sending.
+
+## Meteora DBC config: your choices
+
+| Setting | Default | Env / where | Notes |
+| - | - | - | - |
+| Token name | FOMO City | `TOKEN_NAME` | |
+| Symbol | FOMO | `TOKEN_SYMBOL` | |
+| Metadata URI | **placeholder** | `TOKEN_URI` | Must be a real JSON (name, symbol, image, description) before launch. |
+| Total supply | 1,000,000,000 | `DEFAULT_LAUNCH.totalSupply` | 6 decimals. |
+| Migration threshold | 85 SOL | `MIGRATION_SOL` | SOL raised on the curve before it graduates. 10 SOL is the only value Meteora's own bots are documented to auto-migrate; any other value, our keeper migrates (permissionless). |
+| Supply into the locked pool at migration | 20% | `DEFAULT_LAUNCH.percentageSupplyOnMigration` | The rest is sold along the curve. |
+| Anti-sniper fee | 50% → 1% over 120 s, exponential, 60 steps | `DEFAULT_LAUNCH.antiSniper` | Snipers' fees go to the treasury and on into the pot. |
+| Migrated pool fee | 1% (`FixedBps100`) | `DEFAULT_LAUNCH.migrationFeeOption` | DAMM v2 config `Hv8Lmzmnju6m7kcokVKvwqz7QPmdX9XfKjJsXz8RXcjp`. |
+
+What the defaults produce (computed from the curve):
+
+| | 85 SOL threshold (default) | 10 SOL threshold |
+| - | - | - |
+| Start price | 2.66e-8 SOL per FOMO | 3.13e-9 SOL per FOMO |
+| Start market cap | ≈ 26.6 SOL | ≈ 3.1 SOL |
+| Price at graduation | 4.25e-7 SOL per FOMO | 5.0e-8 SOL per FOMO |
+| Market cap at graduation | ≈ 425 SOL | ≈ 50 SOL |
+| Price increase along the curve | 16× | 16× |
+
+## Meteora DBC config: fixed by the design (don't change)
+
+The program's `initialize` checks several of these and refuses a pool that doesn't match.
+
+| Setting | Value | Why |
+| - | - | - |
+| Quote token | SOL (wrapped) | Checked on-chain. Buybacks swap SOL. |
+| Token type | Plain SPL, immutable, no mint authority | The game rejects Token-2022 mints. No one can mint more. |
+| Fee claimer | Game treasury PDA | Checked on-chain. Gets the partner share of fees. |
+| Pool creator | Game treasury PDA (handed over right after pool creation) | Checked on-chain. Gets the creator share. Together: 80% of all trading fees (Meteora keeps 20%). |
+| Fee collection | In SOL only (`QuoteToken`) | Checked on-chain. |
+| Dynamic fee | On | Extra fee in volatile moments, also to the treasury. |
+| First-swap-at-min-fee | Off | Lets our program swap through CPI. |
+| Pool creation fee | 0 | |
+| Migration fee | 0% | |
+| Migration target | DAMM v2 | Required by Meteora for new launches. |
+| Migrated liquidity | 100% permanently locked (50% partner + 50% creator), both position NFTs owned by the treasury | Nobody can pull liquidity; LP fees keep funding the pot forever. |
+| Team allocation / vesting | None | No presale, no team tokens. |
+| Activation | By timestamp, immediately | |
+
+## Game config: your choices
+
+| Setting | Default | Env | Notes |
+| - | - | - | - |
+| First floor price | 0.01 SOL worth of FOMO | `FLOOR_PRICE_SOL` | Converted at the curve's start price (≈ 376k FOMO at the 85 SOL default). Each floor sold adds 1% of the base price. |
+| Seconds added per floor | 30 | `SECS_PER_FLOOR` | |
+| Timer cap / round length | 24 h | `MAX_TIMER_SECS` | |
+| Max floors per buy | 100 | `launch.ts` | |
+| Keeper key | (required) | `KEEPER_PUBKEY` | Only key allowed to buy back. Changeable later via `set_keeper`. |
+| Max SOL per buyback | 1 SOL | `MAX_BUYBACK_SOL` | Suggest 0.1 for the first hours, then raise via `set_buyback_limits`. |
+| Min gap between buybacks | 300 s | `BUYBACK_GAP_SECS` | |
+| Dev wallet | launch wallet | `DEV_WALLET` | Receives 5% of floor spending, in FOMO. |
+
+## Game config: fixed in the program
+
+| Rule | Value |
+| - | - |
+| Floor buy split | 50% jackpot · 35% dividends to earlier floor holders · 10% next round · 5% dev |
+| Buyback split | 70% current jackpot · 20% next round · 10% burned |
+| Buyback after the timer hits 0 | Goes to the next round |
+| Round with no buyers | Jackpot carries over |
+
+## Keeper settings
+
+| Setting | Default | Env |
+| - | - | - |
+| RPC | (required, use a paid one) | `RPC_URL` |
+| Loop interval | 20 s | `INTERVAL_SECS` |
+| Skip buybacks while the swap fee is above | 2% | `MAX_FEE_BPS` |
+| Smallest buyback | 0.01 SOL | `MIN_BUYBACK_LAMPORTS` |
+| Slippage on buybacks | 1% | `SLIPPAGE_BPS` |
+| Private sending | off | `JITO_URL`, `JITO_TIP_LAMPORTS` (default 0.0001 SOL) |

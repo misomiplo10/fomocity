@@ -19,6 +19,7 @@ idls/                   Meteora DBC + DAMM v2 IDLs (bindings via declare_program
 scripts/                launch, keeper and localnet tests (TypeScript)
 tools/idl/              builds idls/fomocity.json without the Anchor CLI
 METEORA.md              research notes on every Meteora product, with doc links
+LAUNCH.md               every mainnet launch setting: Meteora DBC config, game config, keeper
 ```
 
 ## Run the game (sim mode)
@@ -95,6 +96,8 @@ cd scripts && npm install
 | `npm run keeper` | Loop: settle expired rounds, harvest, migrate if Meteora's keepers haven't, buy back (skips while the swap fee is above `MAX_FEE_BPS`). Env: `RPC_URL`, `KEEPER`, `MINT`, optional `JITO_URL` + `JITO_TIP_LAMPORTS` to send buybacks privately through Jito (not yet tested against a live block engine). |
 
 ### Mainnet launch
+
+All settings, defaults and what's fixed by design are in [LAUNCH.md](LAUNCH.md).
 
 There's no devnet stage. `npm run test:localnet` and `npm run test:rounds` already run against
 Meteora's real mainnet program bytecode. Budget about 5 SOL: program deploy ≈ 4.3 SOL rent
