@@ -45,7 +45,7 @@ const plan = {
   migrationSol: launchOpts.migrationQuoteThresholdSol,
   firstFloor: `${floorPriceSol} SOL = ${(basePrice / 1e6).toLocaleString()} FOMO`,
   secsPerFloor: Number(env('SECS_PER_FLOOR', '30')),
-  maxTimerSecs: Number(env('MAX_TIMER_SECS', '86400')),
+  maxTimerSecs: Number(env('MAX_TIMER_SECS', '1800')),
   keeper: keeperKey.toBase58(),
   buyback: `≤ ${maxBuybackSol} SOL every ≥ ${env('BUYBACK_GAP_SECS', '300')}s`,
   devWallet: devWallet.toBase58(),
@@ -58,11 +58,11 @@ if (!local && process.env.CONFIRM_MAINNET !== 'yes') {
 
 const res = await launch(connection, authority, {
   launch: launchOpts,
-  // 30s per floor, 24h cap (same defaults as game.js).
+  // Rounds start at 30 min; each floor adds 30s, never above 30 min remaining.
   params: {
     basePrice: new BN(basePrice), priceStep: new BN(Math.max(1, Math.round(basePrice / 100))),
     timeAddPerFloor: new BN(env('SECS_PER_FLOOR', '30')),
-    maxTimer: new BN(env('MAX_TIMER_SECS', '86400')), initialTimer: new BN(env('MAX_TIMER_SECS', '86400')),
+    maxTimer: new BN(env('MAX_TIMER_SECS', '1800')), initialTimer: new BN(env('MAX_TIMER_SECS', '1800')),
     maxFloorsPerBuy: 100,
   },
   keeper: keeperKey,

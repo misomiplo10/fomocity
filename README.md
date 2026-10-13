@@ -51,7 +51,7 @@ point players at a lookalike game.
 - Floor price: `base + step × floors_sold_this_round`. `launch.ts` sets `base` so the first
   floor costs `FLOOR_PRICE_SOL` (default 0.01 SOL) at the curve's starting token price, and
   `step` = 1% of that. As FOMO's price rises, floors cost more SOL too.
-- Each floor adds 30s to the timer, capped at 24h from now.
+- Rounds start at 30 minutes. Each floor adds 30s to the timer, capped at 30 minutes from now (launch defaults; set with `MAX_TIMER_SECS` / `SECS_PER_FLOOR`).
 - Every floor buy is split: 50% jackpot · 35% dividends to *existing* holders · 10% next-round seed · 5% dev.
 - When the timer hits 0, anyone can call `settle`. The last buyer then calls `claim_jackpot`.
 - Dividends are claimable at any time with `claim_dividends`, including after the round ends.

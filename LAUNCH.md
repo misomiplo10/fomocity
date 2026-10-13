@@ -54,7 +54,7 @@ The program's `initialize` checks several of these and refuses a pool that doesn
 | - | - | - | - |
 | First floor price | 0.01 SOL worth of FOMO | `FLOOR_PRICE_SOL` | Converted at the curve's start price (≈ 376k FOMO at the 85 SOL default). Each floor sold adds 1% of the base price. |
 | Seconds added per floor | 30 | `SECS_PER_FLOOR` | |
-| Timer cap / round length | 24 h | `MAX_TIMER_SECS` | |
+| Round timer | 30 min | `MAX_TIMER_SECS` | Each round starts at 30:00 and the countdown never shows more than 30:00. Every floor adds 30 s, so a round ends after a stretch with no buying: 30 min if quiet, longer while people keep buying. |
 | Max floors per buy | 100 | `launch.ts` | |
 | Keeper key | (required) | `KEEPER_PUBKEY` | Only key allowed to buy back. Changeable later via `set_keeper`. |
 | Max SOL per buyback | 1 SOL | `MAX_BUYBACK_SOL` | Suggest 0.1 for the first hours, then raise via `set_buyback_limits`. |
