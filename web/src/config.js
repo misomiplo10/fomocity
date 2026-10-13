@@ -1,4 +1,4 @@
-// Which backend to run. No cluster → the local simulator.
+// Which backend to run. No cluster, or no mint yet → the local simulator.
 //
 // Dev / devnet: ?cluster=localnet&mint=<game mint>  (optionally &rpc=<url>)
 // Production: set VITE_CLUSTER, VITE_RPC_URL and VITE_MINT at build time. On mainnet the
@@ -20,6 +20,8 @@ export function chainConfig(search = location.search) {
   const pick = (k, envKey) => (locked ? env[envKey] : q.get(k) || env[envKey]);
   const rpcUrl = pick('rpc', 'VITE_RPC_URL') || DEFAULT_RPC[cluster];
   const mint = pick('mint', 'VITE_MINT');
-  if (!mint) throw new Error('no game mint configured (?mint= or VITE_MINT)');
+  // No token yet (e.g. Vercel is configured before launch): keep showing the simulation
+  // with "Launching soon" instead of breaking the site.
+  if (!mint) return null;
   return { cluster, rpcUrl, mint };
 }
