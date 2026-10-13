@@ -7,142 +7,6 @@
   },
   "instructions": [
     {
-      "name": "buy",
-      "docs": [
-        "Buy `n` floors. `max_cost` protects against the price moving under you."
-      ],
-      "discriminator": [
-        102,
-        6,
-        61,
-        18,
-        1,
-        218,
-        235,
-        234
-      ],
-      "accounts": [
-        {
-          "name": "buyer",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "game"
-        },
-        {
-          "name": "mint",
-          "relations": [
-            "game"
-          ]
-        },
-        {
-          "name": "round",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  114,
-                  111,
-                  117,
-                  110,
-                  100
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "game"
-              },
-              {
-                "kind": "account",
-                "path": "game.current_round",
-                "account": "Game"
-              }
-            ]
-          }
-        },
-        {
-          "name": "player_round",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  112,
-                  108,
-                  97,
-                  121,
-                  101,
-                  114
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "round"
-              },
-              {
-                "kind": "account",
-                "path": "buyer"
-              }
-            ]
-          }
-        },
-        {
-          "name": "buyer_token_account",
-          "writable": true
-        },
-        {
-          "name": "vault",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "mint"
-              }
-            ]
-          }
-        },
-        {
-          "name": "dev_token_account",
-          "writable": true,
-          "relations": [
-            "game"
-          ]
-        },
-        {
-          "name": "token_program"
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
-        }
-      ],
-      "args": [
-        {
-          "name": "n",
-          "type": "u32"
-        },
-        {
-          "name": "max_cost",
-          "type": "u64"
-        }
-      ]
-    },
-    {
       "name": "buyback_damm",
       "docs": [
         "Keeper-only: same as `buyback_dbc`, against the migrated DAMM v2 pool."
@@ -531,210 +395,6 @@
           "type": "u64"
         }
       ]
-    },
-    {
-      "name": "claim_dividends",
-      "docs": [
-        "Withdraw accrued dividends for a round (works during or after the round)."
-      ],
-      "discriminator": [
-        105,
-        60,
-        172,
-        2,
-        136,
-        93,
-        128,
-        151
-      ],
-      "accounts": [
-        {
-          "name": "owner",
-          "signer": true,
-          "relations": [
-            "player_round"
-          ]
-        },
-        {
-          "name": "game"
-        },
-        {
-          "name": "mint",
-          "relations": [
-            "game"
-          ]
-        },
-        {
-          "name": "round",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  114,
-                  111,
-                  117,
-                  110,
-                  100
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "game"
-              },
-              {
-                "kind": "account",
-                "path": "round.id",
-                "account": "Round"
-              }
-            ]
-          }
-        },
-        {
-          "name": "player_round",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  112,
-                  108,
-                  97,
-                  121,
-                  101,
-                  114
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "round"
-              },
-              {
-                "kind": "account",
-                "path": "owner"
-              }
-            ]
-          }
-        },
-        {
-          "name": "owner_token_account",
-          "writable": true
-        },
-        {
-          "name": "vault",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "mint"
-              }
-            ]
-          }
-        },
-        {
-          "name": "token_program"
-        }
-      ],
-      "args": []
-    },
-    {
-      "name": "claim_jackpot",
-      "docs": [
-        "The last buyer of a settled round withdraws the jackpot."
-      ],
-      "discriminator": [
-        28,
-        214,
-        134,
-        248,
-        249,
-        81,
-        206,
-        198
-      ],
-      "accounts": [
-        {
-          "name": "game"
-        },
-        {
-          "name": "mint",
-          "relations": [
-            "game"
-          ]
-        },
-        {
-          "name": "round",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  114,
-                  111,
-                  117,
-                  110,
-                  100
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "game"
-              },
-              {
-                "kind": "account",
-                "path": "round.id",
-                "account": "Round"
-              }
-            ]
-          }
-        },
-        {
-          "name": "winner_token_account",
-          "docs": [
-            "Anyone may crank this, but funds only ever go to the winner's token account."
-          ],
-          "writable": true
-        },
-        {
-          "name": "vault",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "mint"
-              }
-            ]
-          }
-        },
-        {
-          "name": "token_program"
-        }
-      ],
-      "args": []
     },
     {
       "name": "harvest_damm",
@@ -1141,9 +801,6 @@
           "address": "So11111111111111111111111111111111111111112"
         },
         {
-          "name": "dev_token_account"
-        },
-        {
           "name": "game",
           "writable": true,
           "pda": {
@@ -1328,6 +985,85 @@
       ]
     },
     {
+      "name": "record_buy",
+      "docs": [
+        "Keeper-only: report a qualifying FOMO buy seen on the game's Meteora pools. Buys must",
+        "be reported in chain order, inside the round, and at least `min_buy_lamports`. Each one",
+        "adds `time_add_per_buy` to the countdown, capped at `max_timer` after the buy.",
+        "`sig` is the swap's transaction signature, kept in the event so anyone can audit it."
+      ],
+      "discriminator": [
+        13,
+        103,
+        216,
+        143,
+        60,
+        109,
+        237,
+        51
+      ],
+      "accounts": [
+        {
+          "name": "keeper",
+          "signer": true
+        },
+        {
+          "name": "game",
+          "writable": true
+        },
+        {
+          "name": "round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game"
+              },
+              {
+                "kind": "account",
+                "path": "game.current_round",
+                "account": "Game"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "wallet",
+          "type": "pubkey"
+        },
+        {
+          "name": "lamports",
+          "type": "u64"
+        },
+        {
+          "name": "buy_ts",
+          "type": "i64"
+        },
+        {
+          "name": "sig",
+          "type": {
+            "array": [
+              "u8",
+              64
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "set_authority",
       "docs": [
         "Hand admin rights to another key (e.g. a multisig). Passing `Pubkey::default()`",
@@ -1476,7 +1212,10 @@
     {
       "name": "settle",
       "docs": [
-        "Permissionless: anyone can close out an expired round and open the next one."
+        "Permissionless, once the countdown has run out plus `settle_grace_secs` (time for the",
+        "keeper to report buys that landed just before zero). Pays the whole jackpot to the",
+        "last buyer in this same instruction, records the winner, and opens the next round.",
+        "A round with no buys carries its jackpot over."
       ],
       "discriminator": [
         175,
@@ -1497,6 +1236,12 @@
         {
           "name": "game",
           "writable": true
+        },
+        {
+          "name": "mint",
+          "relations": [
+            "game"
+          ]
         },
         {
           "name": "round",
@@ -1530,6 +1275,40 @@
           "writable": true
         },
         {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "winner_token_account",
+          "docs": [
+            "The last buyer's token account; required exactly when the round has a winner.",
+            "Funds can only ever go to an account owned by the last buyer."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "token_program"
+        },
+        {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
         }
@@ -1549,19 +1328,6 @@
         100,
         121,
         18
-      ]
-    },
-    {
-      "name": "PlayerRound",
-      "discriminator": [
-        39,
-        0,
-        149,
-        242,
-        74,
-        67,
-        91,
-        124
       ]
     },
     {
@@ -1593,19 +1359,6 @@
       ]
     },
     {
-      "name": "Bought",
-      "discriminator": [
-        193,
-        56,
-        215,
-        24,
-        156,
-        76,
-        42,
-        104
-      ]
-    },
-    {
       "name": "BoughtBack",
       "discriminator": [
         188,
@@ -1619,16 +1372,16 @@
       ]
     },
     {
-      "name": "Claimed",
+      "name": "BuyRecorded",
       "discriminator": [
-        217,
-        192,
-        123,
-        72,
-        108,
-        150,
-        248,
-        33
+        120,
+        28,
+        2,
+        89,
+        251,
+        106,
+        127,
+        206
       ]
     },
     {
@@ -1666,81 +1419,91 @@
     },
     {
       "code": 6001,
-      "name": "NotStarted",
-      "msg": "Round has not started"
+      "name": "BuyTooSmall",
+      "msg": "Buy is below the minimum that counts"
     },
     {
       "code": 6002,
-      "name": "BadFloorCount",
-      "msg": "Floor count out of range"
+      "name": "BuyBeforeRound",
+      "msg": "Buy happened before this round started"
     },
     {
       "code": 6003,
+      "name": "BuyAfterDeadline",
+      "msg": "Buy happened after the countdown ran out"
+    },
+    {
+      "code": 6004,
+      "name": "BuyOutOfOrder",
+      "msg": "Buys must be reported once each, in chain order"
+    },
+    {
+      "code": 6005,
+      "name": "WinnerAccountMismatch",
+      "msg": "Winner token account must be passed exactly when the round has a winner"
+    },
+    {
+      "code": 6006,
       "name": "SlippageExceeded",
       "msg": "Cost exceeds max_cost"
     },
     {
-      "code": 6004,
+      "code": 6007,
       "name": "Overflow",
       "msg": "Arithmetic overflow"
     },
     {
-      "code": 6005,
-      "name": "NothingToClaim",
-      "msg": "Nothing to claim"
-    },
-    {
-      "code": 6006,
+      "code": 6008,
       "name": "AlreadySettled",
       "msg": "Round already settled"
     },
     {
-      "code": 6007,
+      "code": 6009,
       "name": "TimerRunning",
       "msg": "Timer still running"
     },
     {
-      "code": 6008,
+      "code": 6010,
       "name": "BadParams",
       "msg": "Invalid params"
     },
     {
-      "code": 6009,
+      "code": 6011,
       "name": "UnsupportedMint",
       "msg": "Mint has Token-2022 extensions"
     },
     {
-      "code": 6010,
+      "code": 6012,
       "name": "WrongPool",
       "msg": "Pool or config does not belong to this game's token"
     },
     {
-      "code": 6011,
+      "code": 6013,
       "name": "TreasuryNotCreator",
       "msg": "Treasury PDA must be the DBC pool creator"
     },
     {
-      "code": 6012,
+      "code": 6014,
       "name": "TreasuryNotFeeClaimer",
       "msg": "Treasury PDA must be the DBC config fee claimer"
     },
     {
-      "code": 6013,
+      "code": 6015,
       "name": "NotKeeper",
       "msg": "Only the keeper can buy back"
     },
     {
-      "code": 6014,
+      "code": 6016,
       "name": "BadBuybackSize",
       "msg": "Buyback amount out of range"
     },
     {
-      "code": 6015,
+      "code": 6017,
       "name": "BuybackCooldown",
       "msg": "Buyback cooldown still running"
     },
     {
-      "code": 6016,
+      "code": 6018,
       "name": "AlreadyMigrated",
       "msg": "DBC pool already migrated"
     }
@@ -1800,42 +1563,6 @@
       }
     },
     {
-      "name": "Bought",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "round",
-            "type": "u64"
-          },
-          {
-            "name": "buyer",
-            "type": "pubkey"
-          },
-          {
-            "name": "floors",
-            "type": "u32"
-          },
-          {
-            "name": "cost",
-            "type": "u64"
-          },
-          {
-            "name": "total_floors",
-            "type": "u64"
-          },
-          {
-            "name": "end_ts",
-            "type": "i64"
-          },
-          {
-            "name": "jackpot",
-            "type": "u64"
-          }
-        ]
-      }
-    },
-    {
       "name": "BoughtBack",
       "type": {
         "kind": "struct",
@@ -1876,6 +1603,43 @@
       }
     },
     {
+      "name": "BuyRecorded",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "round",
+            "type": "u64"
+          },
+          {
+            "name": "wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "lamports",
+            "type": "u64"
+          },
+          {
+            "name": "buy_ts",
+            "type": "i64"
+          },
+          {
+            "name": "end_ts",
+            "type": "i64"
+          },
+          {
+            "name": "sig",
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
       "name": "BuybackConfig",
       "type": {
         "kind": "struct",
@@ -1907,26 +1671,6 @@
               "DAMM v2 config the DBC pool migrates into; determines the DAMM pool address."
             ],
             "type": "pubkey"
-          }
-        ]
-      }
-    },
-    {
-      "name": "Claimed",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "round",
-            "type": "u64"
-          },
-          {
-            "name": "owner",
-            "type": "pubkey"
-          },
-          {
-            "name": "amount",
-            "type": "u64"
           }
         ]
       }
@@ -2035,10 +1779,6 @@
             "type": "pubkey"
           },
           {
-            "name": "dev_token_account",
-            "type": "pubkey"
-          },
-          {
             "name": "params",
             "type": {
               "defined": {
@@ -2077,6 +1817,43 @@
                 "name": "FlywheelStats"
               }
             }
+          },
+          {
+            "name": "recent",
+            "docs": [
+              "Ring buffers for the website: latest counted buys and latest winners."
+            ],
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "RecentBuy"
+                  }
+                },
+                16
+              ]
+            }
+          },
+          {
+            "name": "recent_head",
+            "type": "u8"
+          },
+          {
+            "name": "winners",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "Winner"
+                  }
+                },
+                10
+              ]
+            }
+          },
+          {
+            "name": "winners_head",
+            "type": "u8"
           },
           {
             "name": "bump",
@@ -2220,60 +1997,39 @@
         "kind": "struct",
         "fields": [
           {
-            "name": "base_price",
+            "name": "min_buy_lamports",
+            "docs": [
+              "Smallest buy (SOL into the pool, in lamports) that counts."
+            ],
             "type": "u64"
           },
           {
-            "name": "price_step",
-            "type": "u64"
-          },
-          {
-            "name": "time_add_per_floor",
+            "name": "time_add_per_buy",
+            "docs": [
+              "Seconds each counted buy adds to the countdown."
+            ],
             "type": "i64"
           },
           {
             "name": "max_timer",
+            "docs": [
+              "The countdown never exceeds this many seconds after the latest buy."
+            ],
             "type": "i64"
           },
           {
             "name": "initial_timer",
+            "docs": [
+              "Countdown when a round opens."
+            ],
             "type": "i64"
           },
           {
-            "name": "max_floors_per_buy",
-            "type": "u32"
-          }
-        ]
-      }
-    },
-    {
-      "name": "PlayerRound",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "round",
-            "type": "u64"
-          },
-          {
-            "name": "owner",
-            "type": "pubkey"
-          },
-          {
-            "name": "floors",
-            "type": "u64"
-          },
-          {
-            "name": "reward_debt",
-            "type": "u64"
-          },
-          {
-            "name": "claimed",
-            "type": "u64"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
+            "name": "settle_grace_secs",
+            "docs": [
+              "Seconds after zero before anyone can settle, so late-reported buys still count."
+            ],
+            "type": "i64"
           }
         ]
       }
@@ -2734,6 +2490,30 @@
       }
     },
     {
+      "name": "RecentBuy",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "round",
+            "type": "u64"
+          },
+          {
+            "name": "wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "lamports",
+            "type": "u64"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
       "name": "Round",
       "type": {
         "kind": "struct",
@@ -2751,7 +2531,14 @@
             "type": "i64"
           },
           {
-            "name": "total_floors",
+            "name": "buy_count",
+            "type": "u32"
+          },
+          {
+            "name": "total_lamports",
+            "docs": [
+              "Total SOL (lamports) of counted buys this round."
+            ],
             "type": "u64"
           },
           {
@@ -2763,19 +2550,28 @@
             "type": "u64"
           },
           {
-            "name": "acc_per_floor",
-            "type": "u128"
-          },
-          {
             "name": "last_buyer",
             "type": "pubkey"
+          },
+          {
+            "name": "last_buy_ts",
+            "type": "i64"
+          },
+          {
+            "name": "last_sig",
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
           },
           {
             "name": "settled",
             "type": "bool"
           },
           {
-            "name": "jackpot_claimed",
+            "name": "jackpot_paid",
             "type": "bool"
           },
           {
@@ -2876,6 +2672,33 @@
           {
             "name": "volatility_reference",
             "type": "u128"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Winner",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "round",
+            "type": "u64"
+          },
+          {
+            "name": "wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "docs": [
+              "Jackpot paid, in token base units."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
           }
         ]
       }

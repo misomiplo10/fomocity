@@ -3,7 +3,7 @@
 // with the exact SOL that entered or left the pool, both from history and live.
 import assert from 'node:assert/strict';
 import { DynamicBondingCurveClient, SwapMode } from '@meteora-ag/dynamic-bonding-curve-sdk';
-import { getAccount, getAssociatedTokenAddressSync, getOrCreateAssociatedTokenAccount } from '@solana/spl-token';
+import { getAccount, getAssociatedTokenAddressSync } from '@solana/spl-token';
 import { Connection, Keypair, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import BN from 'bn.js';
 import { buybackDbc, fomocity, harvestDbc, launch, readGame, send } from './lib.ts';
@@ -23,9 +23,8 @@ async function main() {
   const [authority, keeper, alice, bob] = await Promise.all([funded(30), funded(5), funded(10), funded(10)]);
   const g0 = await launch(connection, authority, {
     launch: { migrationQuoteThresholdSol: 50, antiSniper: { startingFeeBps: 1_000, endingFeeBps: 100, numberOfPeriod: 2, totalDurationSecs: 2 } },
-    params: { basePrice: new BN(1_000_000), priceStep: new BN(10_000), timeAddPerFloor: new BN(30), maxTimer: new BN(1800), initialTimer: new BN(1800), maxFloorsPerBuy: 100 },
+    params: { minBuyLamports: new BN(50_000_000), timeAddPerBuy: new BN(30), maxTimer: new BN(1800), initialTimer: new BN(1800), settleGraceSecs: new BN(60) },
     keeper: keeper.publicKey, maxBuybackLamports: new BN(LAMPORTS_PER_SOL), buybackGapSecs: new BN(0),
-    devTokenAccount: async (mint) => (await getOrCreateAssociatedTokenAccount(connection, authority, mint, authority.publicKey)).address,
   });
   await sleep(3_000);
 

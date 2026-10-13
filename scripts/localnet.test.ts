@@ -10,8 +10,9 @@ import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram } from 
 import BN from 'bn.js';
 import {
   DAMM_V2_CONFIGS, buybackDamm, buybackDbc, fomocity, harvestDamm, harvestDbc, harvestDbcSurplus,
-  launch, readGame, send,
+  launch, readGame, recordBuy, send,
 } from './lib.ts';
+import { track, type Trade } from './tracker.ts';
 
 const connection = new Connection('http://127.0.0.1:8899', 'confirmed');
 const sol = (n: number) => new BN(n * LAMPORTS_PER_SOL);
@@ -62,13 +63,12 @@ async function main() {
       migrationFeeOption: MigrationFeeOption.FixedBps100,
     },
     params: {
-      basePrice: new BN(1_000_000), priceStep: new BN(10_000), timeAddPerFloor: new BN(30),
-      maxTimer: new BN(3_600), initialTimer: new BN(3_600), maxFloorsPerBuy: 100,
+      minBuyLamports: new BN(50_000_000), timeAddPerBuy: new BN(30),
+      maxTimer: new BN(3_600), initialTimer: new BN(3_600), settleGraceSecs: new BN(60),
     },
     keeper: keeper.publicKey,
     maxBuybackLamports: sol(2),
     buybackGapSecs: new BN(BUYBACK_GAP),
-    devTokenAccount: async (mint) => (await getOrCreateAssociatedTokenAccount(connection, authority, mint, authority.publicKey)).address,
   });
   console.log(`  mint ${g0.mint.toBase58()}\n  DBC pool ${g0.pool.toBase58()}\n  treasury ${g0.treasury.toBase58()}`);
   const program = fomocity(connection, authority);
@@ -123,19 +123,15 @@ async function main() {
   await harvestDbc(program, g);
   await expectError(buybackDbc(program, keeper, g, new BN(1_000)), 'BuybackCooldown');
 
-  step('Player buys floors with the token');
-  const p = traders[0];
-  const pAta = (await getOrCreateAssociatedTokenAccount(connection, p, g.mint, p.publicKey)).address;
-  const roundKey = g.round(1);
-  await fomocity(connection, p).methods.buy(5, new BN(10_000_000))
-    .accountsStrict({
-      buyer: p.publicKey, game: g.game, mint: g.mint, round: roundKey,
-      playerRound: g.player(roundKey, p.publicKey), buyerTokenAccount: pAta, vault: g.vault,
-      devTokenAccount: g.data.devTokenAccount, tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
-    }).rpc();
-  const round2: any = await (program.account as any).round.fetch(roundKey);
-  assert.equal(round2.totalFloors.toNumber(), 5);
-  assert.equal(round2.lastBuyer.toBase58(), p.publicKey.toBase58());
+  step('A Meteora buy is tracked and recorded as the last buyer');
+  const trades: Trade[] = [];
+  await track(connection, g.mint, (t) => trades.push(t));
+  const last = trades.filter((t) => t.side === 'buy' && !t.game).pop()!;
+  assert.equal(last.wallet, traders[1].publicKey.toBase58());
+  await recordBuy(fomocity(connection, keeper), keeper, g, last);
+  const round2: any = await (program.account as any).round.fetch(g.round(1));
+  assert.equal(round2.buyCount, 1);
+  assert.equal(round2.lastBuyer.toBase58(), traders[1].publicKey.toBase58());
 
   step('Completing the bonding curve');
   await traderBuy(traders[2], g0.pool, sol(20));

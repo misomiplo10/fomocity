@@ -1,16 +1,18 @@
-//! FOMO City: last-buyer-wins game paid in a token launched on Meteora's
-//! Dynamic Bonding Curve (DBC).
+//! FOMO City: last-buyer-wins game around a token launched on Meteora's Dynamic Bonding
+//! Curve (DBC).
 //!
-//! Two money streams feed the pot:
+//! Playing = buying the token anywhere (Jupiter, Meteora, any wallet). The keeper watches the
+//! game's Meteora pools and reports each qualifying buy with `record_buy` (wallet, SOL, block
+//! time, transaction signature, all public so anyone can check it against the chain). Each
+//! buy adds time to the round's countdown; when it runs out, `settle` pays the whole jackpot
+//! to the last buyer in the same instruction and records them in the winners list.
 //!
-//! 1. Floor buys (math mirrors web/src/game.js exactly):
-//!    50% jackpot · 35% dividends to existing floor holders · 10% next-round seed · 5% dev
-//! 2. Meteora trading fees. The game's `treasury` PDA is both the DBC config's
-//!    `fee_claimer` and the pool's `creator`, so it collects 80% of every bonding-curve
-//!    trading fee in SOL. After migration it owns the permanently locked DAMM v2 LP
-//!    positions and keeps collecting their SOL fees. Anyone can `harvest_*`; the keeper
-//!    calls `buyback_*` to swap that SOL for the game token, which is split
-//!    70% current jackpot · 20% next-round seed · 10% burned.
+//! The jackpot comes from Meteora trading fees. The game's `treasury` PDA is both the DBC
+//! config's `fee_claimer` and the pool's `creator`, so it collects 80% of every
+//! bonding-curve trading fee in SOL. After migration it owns the permanently locked DAMM v2
+//! LP positions and keeps collecting their SOL fees. Anyone can `harvest_*`; the keeper calls
+//! `buyback_*` to swap that SOL for the game token, which is split
+//! 70% current jackpot · 20% next-round seed · 10% burned.
 //!
 //! Funds sit in program-owned accounts that only these instructions can move.
 use anchor_lang::prelude::*;
@@ -24,12 +26,10 @@ declare_program!(cp_amm);
 use cp_amm::accounts::Pool as DammPool;
 use dynamic_bonding_curve::accounts::{PoolConfig as DbcConfig, VirtualPool as DbcPool};
 
-pub const ACC_PRECISION: u128 = 1_000_000_000_000;
 pub const BPS: u64 = 10_000;
-pub const SPLIT_DIVIDENDS: u64 = 3_500;
-pub const SPLIT_NEXT_ROUND: u64 = 1_000;
-pub const SPLIT_DEV: u64 = 500;
-// jackpot gets the remainder (5_000 bps + rounding dust)
+/// Recent buys and winners kept on the Game account for the website.
+pub const RECENT_BUYS: usize = 16;
+pub const WINNERS_KEPT: usize = 10;
 
 // Buyback output split; jackpot gets the remainder (7_000 bps + dust).
 pub const BUYBACK_NEXT_ROUND: u64 = 2_000;
@@ -49,8 +49,9 @@ pub mod fomocity {
     /// pre-generate the mint keypair → derive game + treasury → create DBC config with
     /// fee_claimer = treasury → create pool → transfer_pool_creator(treasury) → initialize.
     pub fn initialize(ctx: Context<Initialize>, params: Params, buyback: BuybackConfig) -> Result<()> {
-        require!(params.max_floors_per_buy > 0 && params.initial_timer > 0, FomoError::BadParams);
-        require!(params.initial_timer <= params.max_timer, FomoError::BadParams);
+        require!(params.min_buy_lamports > 0 && params.time_add_per_buy >= 0, FomoError::BadParams);
+        require!(params.initial_timer > 0 && params.initial_timer <= params.max_timer, FomoError::BadParams);
+        require!(params.settle_grace_secs >= 0, FomoError::BadParams);
         require!(buyback.max_lamports > 0 && buyback.min_gap_secs >= 0, FomoError::BadParams);
         // Plain mints only: Token-2022 extensions like transfer fees or hooks would make
         // the vault receive less than we account for and drain later claimers.
@@ -72,7 +73,6 @@ pub mod fomocity {
         let game = &mut ctx.accounts.game;
         game.authority = ctx.accounts.authority.key();
         game.mint = ctx.accounts.mint.key();
-        game.dev_token_account = ctx.accounts.dev_token_account.key();
         game.params = params;
         game.current_round = 1;
         game.bump = ctx.bumps.game;
@@ -88,118 +88,78 @@ pub mod fomocity {
         Ok(())
     }
 
-    /// Buy `n` floors. `max_cost` protects against the price moving under you.
-    pub fn buy(ctx: Context<Buy>, n: u32, max_cost: u64) -> Result<()> {
-        let game = &ctx.accounts.game;
-        let p = game.params;
+    /// Keeper-only: report a qualifying FOMO buy seen on the game's Meteora pools. Buys must
+    /// be reported in chain order, inside the round, and at least `min_buy_lamports`. Each one
+    /// adds `time_add_per_buy` to the countdown, capped at `max_timer` after the buy.
+    /// `sig` is the swap's transaction signature, kept in the event so anyone can audit it.
+    pub fn record_buy(ctx: Context<RecordBuy>, wallet: Pubkey, lamports: u64, buy_ts: i64, sig: [u8; 64]) -> Result<()> {
+        let p = ctx.accounts.game.params;
         let now = Clock::get()?.unix_timestamp;
         let round = &mut ctx.accounts.round;
-        require!(!round.settled && now < round.end_ts, FomoError::RoundOver);
-        require!(now >= round.start_ts, FomoError::NotStarted);
-        require!(n >= 1 && n <= p.max_floors_per_buy, FomoError::BadFloorCount);
+        require!(!round.settled, FomoError::RoundOver);
+        require!(lamports >= p.min_buy_lamports, FomoError::BuyTooSmall);
+        require!(buy_ts >= round.start_ts, FomoError::BuyBeforeRound);
+        require!(buy_ts < round.end_ts, FomoError::BuyAfterDeadline);
+        require!(buy_ts >= round.last_buy_ts && buy_ts <= now, FomoError::BuyOutOfOrder);
+        require!(sig != round.last_sig, FomoError::BuyOutOfOrder);
 
-        let cost = cost_of(&p, round.total_floors, n as u64)?;
-        require!(cost <= max_cost, FomoError::SlippageExceeded);
+        round.end_ts = (round.end_ts + p.time_add_per_buy).min(buy_ts + p.max_timer);
+        round.last_buyer = wallet;
+        round.last_buy_ts = buy_ts;
+        round.last_sig = sig;
+        round.buy_count = round.buy_count.checked_add(1).ok_or(FomoError::Overflow)?;
+        round.total_lamports = round.total_lamports.checked_add(lamports).ok_or(FomoError::Overflow)?;
 
-        let to_div = bp(cost, SPLIT_DIVIDENDS);
-        let to_next = bp(cost, SPLIT_NEXT_ROUND);
-        let to_dev = bp(cost, SPLIT_DEV);
-        let mut to_jackpot = cost - to_div - to_next - to_dev;
+        let game = &mut ctx.accounts.game;
+        let i = game.recent_head as usize % RECENT_BUYS;
+        game.recent[i] = RecentBuy { round: round.id, wallet, lamports, ts: buy_ts };
+        game.recent_head = ((i + 1) % RECENT_BUYS) as u8;
 
-        if round.total_floors > 0 {
-            let inc = (to_div as u128) * ACC_PRECISION / (round.total_floors as u128);
-            round.acc_per_floor = round.acc_per_floor.checked_add(inc).ok_or(FomoError::Overflow)?;
-        } else {
-            to_jackpot += to_div;
-        }
-        round.jackpot = round.jackpot.checked_add(to_jackpot).ok_or(FomoError::Overflow)?;
-        round.next_round_pot = round.next_round_pot.checked_add(to_next).ok_or(FomoError::Overflow)?;
-
-        let player = &mut ctx.accounts.player_round;
-        if player.floors == 0 && player.reward_debt == 0 {
-            player.round = round.id;
-            player.owner = ctx.accounts.buyer.key();
-            player.bump = ctx.bumps.player_round;
-        }
-        player.floors = player.floors.checked_add(n as u64).ok_or(FomoError::Overflow)?;
-        player.reward_debt = player
-            .reward_debt
-            .checked_add(((n as u128) * round.acc_per_floor / ACC_PRECISION) as u64)
-            .ok_or(FomoError::Overflow)?;
-
-        round.total_floors += n as u64;
-        round.last_buyer = ctx.accounts.buyer.key();
-        round.end_ts = (round.end_ts + n as i64 * p.time_add_per_floor).min(now + p.max_timer);
-
-        let decimals = ctx.accounts.mint.decimals;
-        let prog = ctx.accounts.token_program.key();
-        token_interface::transfer_checked(
-            CpiContext::new(prog, TransferChecked {
-                from: ctx.accounts.buyer_token_account.to_account_info(),
-                mint: ctx.accounts.mint.to_account_info(),
-                to: ctx.accounts.vault.to_account_info(),
-                authority: ctx.accounts.buyer.to_account_info(),
-            }),
-            cost - to_dev,
-            decimals,
-        )?;
-        token_interface::transfer_checked(
-            CpiContext::new(prog, TransferChecked {
-                from: ctx.accounts.buyer_token_account.to_account_info(),
-                mint: ctx.accounts.mint.to_account_info(),
-                to: ctx.accounts.dev_token_account.to_account_info(),
-                authority: ctx.accounts.buyer.to_account_info(),
-            }),
-            to_dev,
-            decimals,
-        )?;
-
-        emit!(Bought { round: round.id, buyer: round.last_buyer, floors: n, cost, total_floors: round.total_floors, end_ts: round.end_ts, jackpot: round.jackpot });
+        emit!(BuyRecorded { round: round.id, wallet, lamports, buy_ts, end_ts: round.end_ts, sig });
         Ok(())
     }
 
-    /// Withdraw accrued dividends for a round (works during or after the round).
-    pub fn claim_dividends(ctx: Context<ClaimDividends>) -> Result<()> {
-        let round = &ctx.accounts.round;
-        let player = &mut ctx.accounts.player_round;
-        let owed = ((player.floors as u128) * round.acc_per_floor / ACC_PRECISION) as u64 - player.reward_debt;
-        require!(owed > 0, FomoError::NothingToClaim);
-        player.reward_debt += owed;
-        player.claimed += owed;
-        pay_from_vault(&ctx.accounts.game, &ctx.accounts.vault, &ctx.accounts.mint, &ctx.accounts.owner_token_account, &ctx.accounts.token_program, owed)?;
-        emit!(Claimed { round: round.id, owner: player.owner, amount: owed });
-        Ok(())
-    }
-
-    /// Permissionless: anyone can close out an expired round and open the next one.
+    /// Permissionless, once the countdown has run out plus `settle_grace_secs` (time for the
+    /// keeper to report buys that landed just before zero). Pays the whole jackpot to the
+    /// last buyer in this same instruction, records the winner, and opens the next round.
+    /// A round with no buys carries its jackpot over.
     pub fn settle(ctx: Context<Settle>) -> Result<()> {
         let now = Clock::get()?.unix_timestamp;
-        let game = &mut ctx.accounts.game;
+        let p = ctx.accounts.game.params;
         let round = &mut ctx.accounts.round;
         require!(!round.settled, FomoError::AlreadySettled);
-        require!(now >= round.end_ts, FomoError::TimerRunning);
+        require!(now >= round.end_ts + p.settle_grace_secs, FomoError::TimerRunning);
         round.settled = true;
 
-        let has_winner = round.total_floors > 0;
+        let has_winner = round.buy_count > 0;
+        require!(ctx.accounts.winner_token_account.is_some() == has_winner, FomoError::WinnerAccountMismatch);
         let carry = if has_winner { round.next_round_pot } else { round.jackpot + round.next_round_pot };
-        if !has_winner {
+        let paid = if has_winner { round.jackpot } else { 0 };
+        if has_winner {
+            if paid > 0 {
+                pay_from_vault(
+                    &ctx.accounts.game,
+                    &ctx.accounts.vault,
+                    &ctx.accounts.mint,
+                    ctx.accounts.winner_token_account.as_ref().unwrap(),
+                    &ctx.accounts.token_program,
+                    paid,
+                )?;
+            }
+            round.jackpot_paid = true;
+            let game = &mut ctx.accounts.game;
+            let i = game.winners_head as usize % WINNERS_KEPT;
+            game.winners[i] = Winner { round: round.id, wallet: round.last_buyer, amount: paid, ts: now };
+            game.winners_head = ((i + 1) % WINNERS_KEPT) as u8;
+        } else {
             round.jackpot = 0;
         }
+
+        let game = &mut ctx.accounts.game;
         game.current_round += 1;
         let p = game.params;
         ctx.accounts.next_round.open(game.current_round, now, &p, carry, ctx.bumps.next_round);
-        emit!(Settled { round: round.id, winner: round.last_buyer, jackpot: round.jackpot, carry });
-        Ok(())
-    }
-
-    /// The last buyer of a settled round withdraws the jackpot.
-    pub fn claim_jackpot(ctx: Context<ClaimJackpot>) -> Result<()> {
-        let round = &mut ctx.accounts.round;
-        require!(round.settled, FomoError::TimerRunning);
-        require!(!round.jackpot_claimed && round.jackpot > 0, FomoError::NothingToClaim);
-        round.jackpot_claimed = true;
-        let amount = round.jackpot;
-        pay_from_vault(&ctx.accounts.game, &ctx.accounts.vault, &ctx.accounts.mint, &ctx.accounts.winner_token_account, &ctx.accounts.token_program, amount)?;
+        emit!(Settled { round: round.id, winner: if has_winner { round.last_buyer } else { Pubkey::default() }, jackpot: paid, carry });
         Ok(())
     }
 
@@ -459,13 +419,6 @@ fn bp(amount: u64, bps: u64) -> u64 {
     ((amount as u128) * (bps as u128) / (BPS as u128)) as u64
 }
 
-/// n * base + step * (n * sold + n(n-1)/2)
-pub fn cost_of(p: &Params, sold: u64, n: u64) -> Result<u64> {
-    let (sold, n) = (sold as u128, n as u128);
-    let c = n * p.base_price as u128 + p.price_step as u128 * (n * sold + n * (n - 1) / 2);
-    u64::try_from(c).map_err(|_| FomoError::Overflow.into())
-}
-
 /// Buyback output split: (to_jackpot, to_next_round, burned). Mirrors game.js `splitBuyback`.
 pub fn split_buyback(out: u64) -> (u64, u64, u64) {
     let to_next = bp(out, BUYBACK_NEXT_ROUND);
@@ -582,12 +535,16 @@ fn pay_from_vault<'info>(
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, InitSpace)]
 pub struct Params {
-    pub base_price: u64,
-    pub price_step: u64,
-    pub time_add_per_floor: i64,
+    /// Smallest buy (SOL into the pool, in lamports) that counts.
+    pub min_buy_lamports: u64,
+    /// Seconds each counted buy adds to the countdown.
+    pub time_add_per_buy: i64,
+    /// The countdown never exceeds this many seconds after the latest buy.
     pub max_timer: i64,
+    /// Countdown when a round opens.
     pub initial_timer: i64,
-    pub max_floors_per_buy: u32,
+    /// Seconds after zero before anyone can settle, so late-reported buys still count.
+    pub settle_grace_secs: i64,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, InitSpace)]
@@ -616,7 +573,6 @@ pub struct FlywheelStats {
 pub struct Game {
     pub authority: Pubkey,
     pub mint: Pubkey,
-    pub dev_token_account: Pubkey,
     pub params: Params,
     pub current_round: u64,
     pub dbc_pool: Pubkey,
@@ -624,9 +580,31 @@ pub struct Game {
     pub damm_pool: Pubkey,
     pub buyback: BuybackConfig,
     pub stats: FlywheelStats,
+    /// Ring buffers for the website: latest counted buys and latest winners.
+    pub recent: [RecentBuy; RECENT_BUYS],
+    pub recent_head: u8,
+    pub winners: [Winner; WINNERS_KEPT],
+    pub winners_head: u8,
     pub bump: u8,
     pub vault_bump: u8,
     pub treasury_bump: u8,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Default, InitSpace)]
+pub struct RecentBuy {
+    pub round: u64,
+    pub wallet: Pubkey,
+    pub lamports: u64,
+    pub ts: i64,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Default, InitSpace)]
+pub struct Winner {
+    pub round: u64,
+    pub wallet: Pubkey,
+    /// Jackpot paid, in token base units.
+    pub amount: u64,
+    pub ts: i64,
 }
 
 #[account]
@@ -635,13 +613,16 @@ pub struct Round {
     pub id: u64,
     pub start_ts: i64,
     pub end_ts: i64,
-    pub total_floors: u64,
+    pub buy_count: u32,
+    /// Total SOL (lamports) of counted buys this round.
+    pub total_lamports: u64,
     pub jackpot: u64,
     pub next_round_pot: u64,
-    pub acc_per_floor: u128,
     pub last_buyer: Pubkey,
+    pub last_buy_ts: i64,
+    pub last_sig: [u8; 64],
     pub settled: bool,
-    pub jackpot_claimed: bool,
+    pub jackpot_paid: bool,
     pub bump: u8,
 }
 
@@ -655,17 +636,6 @@ impl Round {
     }
 }
 
-#[account]
-#[derive(InitSpace)]
-pub struct PlayerRound {
-    pub round: u64,
-    pub owner: Pubkey,
-    pub floors: u64,
-    pub reward_debt: u64,
-    pub claimed: u64,
-    pub bump: u8,
-}
-
 // ---------- accounts ----------
 
 #[derive(Accounts)]
@@ -676,8 +646,6 @@ pub struct Initialize<'info> {
     pub mint: Box<InterfaceAccount<'info, Mint>>,
     #[account(address = WSOL_MINT, mint::token_program = token_program)]
     pub quote_mint: Box<InterfaceAccount<'info, Mint>>,
-    #[account(token::mint = mint, token::token_program = token_program)]
-    pub dev_token_account: Box<InterfaceAccount<'info, TokenAccount>>,
     #[account(init, payer = authority, space = 8 + Game::INIT_SPACE, seeds = [b"game", mint.key().as_ref()], bump)]
     pub game: Box<Account<'info, Game>>,
     /// CHECK: data-less PDA that signs Meteora claims/swaps and owns the WSOL + stash accounts.
@@ -709,75 +677,37 @@ pub struct Initialize<'info> {
 }
 
 #[derive(Accounts)]
-pub struct Buy<'info> {
+pub struct RecordBuy<'info> {
+    #[account(address = game.buyback.keeper @ FomoError::NotKeeper)]
+    pub keeper: Signer<'info>,
     #[account(mut)]
-    pub buyer: Signer<'info>,
-    #[account(has_one = mint, has_one = dev_token_account)]
     pub game: Box<Account<'info, Game>>,
-    pub mint: InterfaceAccount<'info, Mint>,
     #[account(mut, seeds = [b"round", game.key().as_ref(), &game.current_round.to_le_bytes()], bump = round.bump)]
-    pub round: Account<'info, Round>,
-    #[account(
-        init_if_needed, payer = buyer, space = 8 + PlayerRound::INIT_SPACE,
-        seeds = [b"player", round.key().as_ref(), buyer.key().as_ref()], bump,
-    )]
-    pub player_round: Account<'info, PlayerRound>,
-    #[account(mut, token::mint = mint, token::authority = buyer, token::token_program = token_program)]
-    pub buyer_token_account: InterfaceAccount<'info, TokenAccount>,
-    #[account(mut, seeds = [b"vault", mint.key().as_ref()], bump = game.vault_bump)]
-    pub vault: InterfaceAccount<'info, TokenAccount>,
-    #[account(mut)]
-    pub dev_token_account: InterfaceAccount<'info, TokenAccount>,
-    pub token_program: Interface<'info, TokenInterface>,
-    pub system_program: Program<'info, System>,
-}
-
-#[derive(Accounts)]
-pub struct ClaimDividends<'info> {
-    pub owner: Signer<'info>,
-    #[account(has_one = mint)]
-    pub game: Box<Account<'info, Game>>,
-    pub mint: InterfaceAccount<'info, Mint>,
-    #[account(seeds = [b"round", game.key().as_ref(), &round.id.to_le_bytes()], bump = round.bump)]
-    pub round: Account<'info, Round>,
-    #[account(mut, has_one = owner, seeds = [b"player", round.key().as_ref(), owner.key().as_ref()], bump = player_round.bump)]
-    pub player_round: Account<'info, PlayerRound>,
-    #[account(mut, token::mint = mint, token::token_program = token_program)]
-    pub owner_token_account: InterfaceAccount<'info, TokenAccount>,
-    #[account(mut, seeds = [b"vault", mint.key().as_ref()], bump = game.vault_bump)]
-    pub vault: InterfaceAccount<'info, TokenAccount>,
-    pub token_program: Interface<'info, TokenInterface>,
+    pub round: Box<Account<'info, Round>>,
 }
 
 #[derive(Accounts)]
 pub struct Settle<'info> {
     #[account(mut)]
     pub cranker: Signer<'info>,
-    #[account(mut)]
+    #[account(mut, has_one = mint)]
     pub game: Box<Account<'info, Game>>,
+    pub mint: Box<InterfaceAccount<'info, Mint>>,
     #[account(mut, seeds = [b"round", game.key().as_ref(), &game.current_round.to_le_bytes()], bump = round.bump)]
-    pub round: Account<'info, Round>,
+    pub round: Box<Account<'info, Round>>,
     #[account(
         init, payer = cranker, space = 8 + Round::INIT_SPACE,
         seeds = [b"round", game.key().as_ref(), &(game.current_round + 1).to_le_bytes()], bump,
     )]
-    pub next_round: Account<'info, Round>,
-    pub system_program: Program<'info, System>,
-}
-
-#[derive(Accounts)]
-pub struct ClaimJackpot<'info> {
-    #[account(has_one = mint)]
-    pub game: Box<Account<'info, Game>>,
-    pub mint: InterfaceAccount<'info, Mint>,
-    #[account(mut, seeds = [b"round", game.key().as_ref(), &round.id.to_le_bytes()], bump = round.bump)]
-    pub round: Account<'info, Round>,
-    /// Anyone may crank this, but funds only ever go to the winner's token account.
-    #[account(mut, token::mint = mint, token::authority = round.last_buyer, token::token_program = token_program)]
-    pub winner_token_account: InterfaceAccount<'info, TokenAccount>,
+    pub next_round: Box<Account<'info, Round>>,
     #[account(mut, seeds = [b"vault", mint.key().as_ref()], bump = game.vault_bump)]
-    pub vault: InterfaceAccount<'info, TokenAccount>,
+    pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    /// The last buyer's token account; required exactly when the round has a winner.
+    /// Funds can only ever go to an account owned by the last buyer.
+    #[account(mut, token::mint = mint, token::authority = round.last_buyer, token::token_program = token_program)]
+    pub winner_token_account: Option<Box<InterfaceAccount<'info, TokenAccount>>>,
     pub token_program: Interface<'info, TokenInterface>,
+    pub system_program: Program<'info, System>,
 }
 
 /// Accounts shared by every DBC call. Pool and config are pinned to the ones recorded
@@ -989,9 +919,7 @@ pub enum Venue {
 }
 
 #[event]
-pub struct Bought { pub round: u64, pub buyer: Pubkey, pub floors: u32, pub cost: u64, pub total_floors: u64, pub end_ts: i64, pub jackpot: u64 }
-#[event]
-pub struct Claimed { pub round: u64, pub owner: Pubkey, pub amount: u64 }
+pub struct BuyRecorded { pub round: u64, pub wallet: Pubkey, pub lamports: u64, pub buy_ts: i64, pub end_ts: i64, pub sig: [u8; 64] }
 #[event]
 pub struct Settled { pub round: u64, pub winner: Pubkey, pub jackpot: u64, pub carry: u64 }
 #[event]
@@ -1004,11 +932,13 @@ pub struct BoughtBack { pub round: u64, pub venue: Venue, pub lamports_in: u64, 
 #[error_code]
 pub enum FomoError {
     #[msg("Round is over")] RoundOver,
-    #[msg("Round has not started")] NotStarted,
-    #[msg("Floor count out of range")] BadFloorCount,
+    #[msg("Buy is below the minimum that counts")] BuyTooSmall,
+    #[msg("Buy happened before this round started")] BuyBeforeRound,
+    #[msg("Buy happened after the countdown ran out")] BuyAfterDeadline,
+    #[msg("Buys must be reported once each, in chain order")] BuyOutOfOrder,
+    #[msg("Winner token account must be passed exactly when the round has a winner")] WinnerAccountMismatch,
     #[msg("Cost exceeds max_cost")] SlippageExceeded,
     #[msg("Arithmetic overflow")] Overflow,
-    #[msg("Nothing to claim")] NothingToClaim,
     #[msg("Round already settled")] AlreadySettled,
     #[msg("Timer still running")] TimerRunning,
     #[msg("Invalid params")] BadParams,
@@ -1025,19 +955,6 @@ pub enum FomoError {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn cost_matches_js_engine() {
-        let p = Params { base_price: 1_000_000, price_step: 10_000, time_add_per_floor: 30, max_timer: 86_400, initial_timer: 86_400, max_floors_per_buy: 100 };
-        // first 20 floors: 20 * 1.00 + 0.01 * 190 = 21.90
-        assert_eq!(cost_of(&p, 0, 20).unwrap(), 21_900_000);
-        // floors 21..26 after 20 sold: 6 * 1.00 + 0.01 * (120 + 15) = 7.35
-        assert_eq!(cost_of(&p, 20, 6).unwrap(), 7_350_000);
-        // split always sums to cost
-        let c = cost_of(&p, 7, 3).unwrap();
-        let (d, nx, dv) = (bp(c, SPLIT_DIVIDENDS), bp(c, SPLIT_NEXT_ROUND), bp(c, SPLIT_DEV));
-        assert!(c - d - nx - dv >= c / 2);
-    }
 
     #[test]
     fn buyback_split_matches_js_engine() {

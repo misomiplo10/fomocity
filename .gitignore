@@ -5,3 +5,5 @@ target/
 tools/idl/target
 .env
 !.env.example
+trades.jsonl
+recorded.jsonl

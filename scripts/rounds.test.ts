@@ -1,24 +1,25 @@
-// On-chain game rules on a local validator (./localnet.sh): floor pricing and splits,
-// dividends, a buyback after the timer ran out, settle, jackpot claims, a round with no
-// buyers carrying over, and renouncing the admin key. Amounts are checked exactly against
-// BigInt versions of the formulas in lib.rs.
+// On-chain game rules on a local validator (./localnet.sh). Players buy FOMO on the real
+// Meteora bonding curve; the tracker sees those swaps and the keeper reports them with
+// record_buy. Checks every guard, the countdown math, the jackpot being paid automatically
+// to the last buyer at settle, the winners list, carry-over, and admin hand-off.
 import assert from 'node:assert/strict';
+import { randomBytes } from 'node:crypto';
+import { utils } from '@coral-xyz/anchor';
 import { DynamicBondingCurveClient, SwapMode } from '@meteora-ag/dynamic-bonding-curve-sdk';
-import { TOKEN_PROGRAM_ID, getAccount, getOrCreateAssociatedTokenAccount } from '@solana/spl-token';
+import { TOKEN_PROGRAM_ID, getAccount, getAssociatedTokenAddressSync } from '@solana/spl-token';
 import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram } from '@solana/web3.js';
 import BN from 'bn.js';
-import { buybackDbc, fomocity, harvestDbc, launch, readGame, send, settle, type GameState } from './lib.ts';
+import { buybackDbc, fomocity, harvestDbc, launch, readGame, recordBuy, send, settle, type GameState } from './lib.ts';
+import { track, type Trade } from './tracker.ts';
 
 const connection = new Connection('http://127.0.0.1:8899', 'confirmed');
 const dbc = new DynamicBondingCurveClient(connection, 'confirmed');
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const step = (s: string) => console.log(`▸ ${s}`);
 const big = (v: BN | bigint | number) => BigInt(v.toString());
-
-const P = { base: 1_000_000n, step: 10_000n, timeAdd: 2, maxTimer: 20, initialTimer: 10 };
-const ACC = 1_000_000_000_000n;
-const bp = (a: bigint, bps: bigint) => (a * bps) / 10_000n;
-const costOf = (sold: bigint, n: bigint) => n * P.base + P.step * (n * sold + (n * (n - 1n)) / 2n);
+const P = { minBuy: 0.05 * LAMPORTS_PER_SOL, timeAdd: 5, maxTimer: 15, initial: 10, grace: 3 };
+// A made-up 64-byte transaction signature, for guard checks that never reach the real swaps.
+const fakeSig = () => utils.bytes.bs58.encode(randomBytes(64));
 
 async function funded(n: number) {
   const kp = Keypair.generate();
@@ -36,138 +37,116 @@ async function expectError(p: Promise<unknown>, name: string) {
 }
 
 const chainNow = async () => (await connection.getBlockTime(await connection.getSlot('confirmed')))!;
-async function waitUntil(ts: number) {
-  while ((await chainNow()) < ts) await sleep(1000);
-}
+async function waitUntil(ts: number) { while ((await chainNow()) < ts) await sleep(500); }
 
 async function main() {
-  const [authority, keeper, alice, bob, carol] = await Promise.all([funded(50), funded(5), funded(20), funded(20), funded(5)]);
+  const [authority, keeper, alice, bob, carol] = await Promise.all([funded(30), funded(5), funded(10), funded(10), funded(5)]);
 
-  step('launch with 10s rounds');
+  step('launch: 0.05 SOL minimum, +5s per buy, 15s cap, 10s start, 3s grace');
   const g0 = await launch(connection, authority, {
     launch: { migrationQuoteThresholdSol: 50, antiSniper: { startingFeeBps: 1_000, endingFeeBps: 100, numberOfPeriod: 2, totalDurationSecs: 2 } },
     params: {
-      basePrice: new BN(P.base.toString()), priceStep: new BN(P.step.toString()), timeAddPerFloor: new BN(P.timeAdd),
-      maxTimer: new BN(P.maxTimer), initialTimer: new BN(P.initialTimer), maxFloorsPerBuy: 100,
+      minBuyLamports: new BN(P.minBuy), timeAddPerBuy: new BN(P.timeAdd), maxTimer: new BN(P.maxTimer),
+      initialTimer: new BN(P.initial), settleGraceSecs: new BN(P.grace),
     },
-    keeper: keeper.publicKey,
-    maxBuybackLamports: new BN(LAMPORTS_PER_SOL),
-    buybackGapSecs: new BN(0),
-    devTokenAccount: async (mint) => (await getOrCreateAssociatedTokenAccount(connection, authority, mint, authority.publicKey)).address,
+    keeper: keeper.publicKey, maxBuybackLamports: new BN(LAMPORTS_PER_SOL), buybackGapSecs: new BN(0),
   });
   const program = fomocity(connection, authority);
   let g: GameState = await readGame(program, g0.mint);
   const fetchRound = async (id: number) => (program.account as any).round.fetch(g.round(id));
+  const keeperProgram = fomocity(connection, keeper);
 
-  step('players buy FOMO on the bonding curve');
-  await sleep(3_000);
-  const ata: Record<string, PublicKey> = {};
-  for (const [name, kp] of Object.entries({ alice, bob, carol })) {
+  step('alice then bob buy FOMO on Meteora; the tracker sees both');
+  const swap = async (kp: Keypair, sol: number) => {
     const tx = await dbc.pool.swap2({
       owner: kp.publicKey, pool: g0.pool, swapBaseForQuote: false, referralTokenAccount: null,
-      swapMode: SwapMode.ExactIn, amountIn: new BN(LAMPORTS_PER_SOL), minimumAmountOut: new BN(0),
+      swapMode: SwapMode.ExactIn, amountIn: new BN(sol * LAMPORTS_PER_SOL), minimumAmountOut: new BN(0),
     });
     await send(connection, tx, [kp]);
-    ata[name] = (await getOrCreateAssociatedTokenAccount(connection, kp, g.mint, kp.publicKey)).address;
-  }
-  const bal = async (a: PublicKey) => (await getAccount(connection, a)).amount;
-
-  const buy = (kp: Keypair, n: number, roundId = 1, maxCost = 1_000_000_000) => {
-    const round = g.round(roundId);
-    return fomocity(connection, kp).methods.buy(n, new BN(maxCost)).accountsStrict({
-      buyer: kp.publicKey, game: g.game, mint: g.mint, round, playerRound: g.player(round, kp.publicKey),
-      buyerTokenAccount: ata[kp === alice ? 'alice' : kp === bob ? 'bob' : 'carol'], vault: g.vault,
-      devTokenAccount: g.data.devTokenAccount, tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
-    }).rpc();
   };
+  await swap(alice, 0.3);
+  await swap(bob, 0.2);
+  const trades: Trade[] = [];
+  await track(connection, g0.mint, (t) => trades.push(t));
+  const [ta, tb] = trades.filter((t) => t.side === 'buy' && !t.game);
+  assert.equal(ta.wallet, alice.publicKey.toBase58());
+  assert.equal(tb.wallet, bob.publicKey.toBase58());
 
-  step('slippage guard and floor-count guard');
-  await expectError(buy(alice, 4, 1, Number(costOf(0n, 4n)) - 1), 'SlippageExceeded');
-  await expectError(buy(alice, 101), 'BadFloorCount');
+  step('guards: keeper only, minimum size, before round, future, order, duplicates');
+  await expectError(recordBuy(fomocity(connection, carol), carol, g, ta), 'NotKeeper');
+  await expectError(recordBuy(keeperProgram, keeper, g, { ...ta, lamports: String(P.minBuy - 1), sig: fakeSig() }), 'BuyTooSmall');
+  const r0 = await fetchRound(1);
+  await expectError(recordBuy(keeperProgram, keeper, g, { ...ta, time: r0.startTs.toNumber() - 1, sig: fakeSig() }), 'BuyBeforeRound');
+  await expectError(recordBuy(keeperProgram, keeper, g, { ...ta, time: (await chainNow()) + 5, sig: fakeSig() }), 'BuyOutOfOrder');
 
-  step('alice buys 4, bob buys 2: splits and dividends are exact');
-  const devBefore = await bal(g.data.devTokenAccount);
-  await buy(alice, 4);
-  const c1 = costOf(0n, 4n);
-  await buy(bob, 2);
-  const c2 = costOf(4n, 2n);
-  // First buy has no earlier holders, so its dividend slice joins the jackpot.
-  const jackpot1 = c1 - bp(c1, 1_000n) - bp(c1, 500n);
-  const div2 = bp(c2, 3_500n);
-  const jackpot2 = c2 - div2 - bp(c2, 1_000n) - bp(c2, 500n);
-  const acc = (div2 * ACC) / 4n;
+  step('record alice, then bob: countdown math and last buyer');
+  await recordBuy(keeperProgram, keeper, g, ta);
   let r1 = await fetchRound(1);
-  assert.equal(big(r1.totalFloors), 6n);
-  assert.equal(big(r1.jackpot), jackpot1 + jackpot2);
-  assert.equal(big(r1.nextRoundPot), bp(c1, 1_000n) + bp(c2, 1_000n));
-  assert.equal(big(r1.accPerFloor), acc);
-  assert.equal(r1.lastBuyer.toBase58(), bob.publicKey.toBase58());
-  assert.equal((await bal(g.data.devTokenAccount)) - devBefore, bp(c1, 500n) + bp(c2, 500n), '5% dev');
-
-  step('alice claims dividends; bob has none (his floors came after)');
-  const owed = (4n * acc) / ACC;
-  const a0 = await bal(ata.alice);
-  const claim = (kp: Keypair, tokenAccount: PublicKey, roundId = 1) => fomocity(connection, kp).methods.claimDividends().accountsStrict({
-    owner: kp.publicKey, game: g.game, mint: g.mint, round: g.round(roundId), playerRound: g.player(g.round(roundId), kp.publicKey),
-    ownerTokenAccount: tokenAccount, vault: g.vault, tokenProgram: TOKEN_PROGRAM_ID,
-  }).rpc();
-  await claim(alice, ata.alice);
-  assert.equal((await bal(ata.alice)) - a0, owed);
-  await expectError(claim(alice, ata.alice), 'NothingToClaim');
-  await expectError(claim(bob, ata.bob), 'NothingToClaim');
-
-  step('timer: each floor adds 2s, capped at 20s from the buy');
+  const end0 = r0.endTs.toNumber();
+  const endA = Math.min(end0 + P.timeAdd, ta.time! + P.maxTimer);
+  assert.equal(r1.endTs.toNumber(), endA);
+  assert.equal(r1.lastBuyer.toBase58(), ta.wallet);
+  await expectError(recordBuy(keeperProgram, keeper, g, ta), 'BuyOutOfOrder'); // same signature again
+  await recordBuy(keeperProgram, keeper, g, tb);
   r1 = await fetchRound(1);
-  assert.ok(r1.endTs.toNumber() <= r1.startTs.toNumber() + P.initialTimer + 6 * P.timeAdd);
+  assert.equal(r1.endTs.toNumber(), Math.min(endA + P.timeAdd, tb.time! + P.maxTimer));
+  assert.equal(r1.lastBuyer.toBase58(), tb.wallet);
+  assert.equal(r1.buyCount, 2);
+  assert.equal(big(r1.totalLamports), BigInt(ta.lamports) + BigInt(tb.lamports));
+  await expectError(recordBuy(keeperProgram, keeper, g, { ...tb, time: ta.time! - 1, sig: fakeSig() }), 'BuyOutOfOrder');
+  g = await readGame(program, g0.mint);
+  const recent = g.data.recent.filter((b: any) => !b.wallet.equals(PublicKey.default));
+  assert.deepEqual(recent.map((b: any) => b.wallet.toBase58()), [ta.wallet, tb.wallet], 'recent buys list');
 
-  step('round expires: buys are rejected');
-  await waitUntil(r1.endTs.toNumber());
-  await expectError(buy(carol, 1), 'RoundOver');
-
-  step('buyback after expiry goes to the next round, not the decided jackpot');
+  step('trading fees → buyback → jackpot');
   await harvestDbc(program, g);
   g = await readGame(program, g0.mint);
-  const wsol = big((await getAccount(connection, g.wsolVault)).amount);
-  assert.ok(wsol > 0n);
-  const jackpotBefore = big((await fetchRound(1)).jackpot);
-  const nextBefore = big((await fetchRound(1)).nextRoundPot);
-  await buybackDbc(program, keeper, g, new BN(wsol.toString()));
-  g = await readGame(program, g0.mint);
-  const out = big(g.data.stats.boughtTokens);
+  await buybackDbc(program, keeper, g, new BN((await getAccount(connection, g.wsolVault)).amount.toString()));
   r1 = await fetchRound(1);
-  assert.equal(big(r1.jackpot), jackpotBefore, 'jackpot untouched');
-  assert.equal(big(r1.nextRoundPot) - nextBefore, out - bp(out, 1_000n), '90% to next round');
+  const jackpot = big(r1.jackpot);
+  assert.ok(jackpot > 0n, 'jackpot funded');
 
-  step('settle (anyone) opens round 2 seeded with the next-round pot');
-  await settle(fomocity(connection, carol), g, carol.publicKey);
-  await expectError(settle(fomocity(connection, carol), await readGame(program, g0.mint), carol.publicKey), 'TimerRunning');
-  g = await readGame(program, g0.mint);
-  assert.equal(big(g.data.currentRound), 2n);
-  const r2 = await fetchRound(2);
-  assert.equal(big(r2.jackpot), big(r1.nextRoundPot));
+  step('a buy after the deadline is rejected; settle waits for the grace period');
+  await waitUntil(r1.endTs.toNumber());
+  await expectError(recordBuy(keeperProgram, keeper, g, { ...tb, time: r1.endTs.toNumber(), sig: fakeSig() }), 'BuyAfterDeadline');
+  if ((await chainNow()) < r1.endTs.toNumber() + P.grace) await expectError(settle(program, g, authority.publicKey), 'TimerRunning');
+  await waitUntil(r1.endTs.toNumber() + P.grace);
 
-  step('jackpot only pays the last buyer, once');
-  const claimJackpot = (winnerAta: PublicKey) => program.methods.claimJackpot().accountsStrict({
-    game: g.game, mint: g.mint, round: g.round(1), winnerTokenAccount: winnerAta, vault: g.vault, tokenProgram: TOKEN_PROGRAM_ID,
+  step('settle must pay the last buyer, not anyone else');
+  const settleWith = (winnerTokenAccount: PublicKey | null) => fomocity(connection, carol).methods.settle().accountsStrict({
+    cranker: carol.publicKey, game: g.game, mint: g.mint, round: g.round(1), nextRound: g.round(2), vault: g.vault,
+    winnerTokenAccount: winnerTokenAccount as any, tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
   }).rpc();
-  await expectError(claimJackpot(ata.alice), 'ConstraintTokenOwner');
-  const b0 = await bal(ata.bob);
-  await claimJackpot(ata.bob);
-  assert.equal((await bal(ata.bob)) - b0, big(r1.jackpot));
-  await expectError(claimJackpot(ata.bob), 'NothingToClaim');
+  const ataOf = (kp: Keypair) => getAssociatedTokenAddressSync(g.mint, kp.publicKey);
+  await expectError(settleWith(ataOf(alice)), 'ConstraintTokenOwner');
+  await expectError(settleWith(null), 'WinnerAccountMismatch');
 
-  step('round 2 with no buyers carries everything into round 3');
-  await waitUntil(r2.endTs.toNumber());
+  step('settle by anyone pays bob the jackpot automatically');
+  const bob0 = (await getAccount(connection, ataOf(bob))).amount;
+  await settle(fomocity(connection, carol), g, carol.publicKey);
+  assert.equal((await getAccount(connection, ataOf(bob))).amount - bob0, jackpot, 'bob received the jackpot');
+  r1 = await fetchRound(1);
+  assert.ok(r1.settled && r1.jackpotPaid);
+  g = await readGame(program, g0.mint);
+  const winners = g.data.winners.filter((w: any) => !w.wallet.equals(PublicKey.default));
+  assert.equal(winners.length, 1);
+  assert.equal(winners[0].wallet.toBase58(), bob.publicKey.toBase58());
+  assert.equal(big(winners[0].amount), jackpot);
+  assert.equal(big(winners[0].round), 1n);
+  const r2 = await fetchRound(2);
+  assert.equal(big(r2.jackpot), big(r1.nextRoundPot), 'round 2 seeded with the next-round pot');
+
+  step('a round with no buys carries its jackpot over');
+  await waitUntil(r2.endTs.toNumber() + P.grace);
   await settle(program, g, authority.publicKey);
   g = await readGame(program, g0.mint);
   const r3 = await fetchRound(3);
   assert.equal(big(r3.jackpot), big(r2.jackpot) + big(r2.nextRoundPot));
+  assert.equal(g.data.winners.filter((w: any) => !w.wallet.equals(PublicKey.default)).length, 1, 'no new winner');
 
   step('vault holds exactly what is still owed');
-  // Owed: round 3 jackpot + any unclaimed round-1/2 dividends (none) + rounding dust.
-  const vault = await bal(g.vault);
-  assert.ok(vault >= big(r3.jackpot), `vault ${vault} covers round 3 jackpot ${r3.jackpot}`);
-  assert.ok(vault - big(r3.jackpot) < 10n, `dust only (${vault - big(r3.jackpot)})`);
+  const vault = (await getAccount(connection, g.vault)).amount;
+  assert.ok(vault >= big(r3.jackpot) && vault - big(r3.jackpot) < 10n, `vault ${vault} vs owed ${r3.jackpot}`);
 
   step('admin hands off and renounces');
   const ms = Keypair.generate();
@@ -179,6 +158,7 @@ async function main() {
   assert.ok(g.data.authority.equals(PublicKey.default));
 
   console.log('\n✓ All round-rule checks passed.');
+  process.exit(0);
 }
 
 main().catch((e) => {

@@ -2,7 +2,7 @@
 // Talks to three programs: fomocity (ours), Meteora DBC and Meteora DAMM v2.
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { AnchorProvider, Program, Wallet, type Idl } from '@coral-xyz/anchor';
+import { AnchorProvider, Program, Wallet, utils, type Idl } from '@coral-xyz/anchor';
 import {
   ActivationType, BaseFeeMode, CollectFeeMode, DynamicBondingCurveClient, MigrationFeeOption,
   MigrationOption, SwapMode, TokenAuthorityOption, TokenDecimal, TokenType, buildCurve,
@@ -10,12 +10,16 @@ import {
   deriveDbcPoolAddress, deriveDbcPoolAuthority, getCurrentPoint,
 } from '@meteora-ag/dynamic-bonding-curve-sdk';
 import { CpAmm, SwapMode as DammSwapMode } from '@meteora-ag/cp-amm-sdk';
-import { NATIVE_MINT, TOKEN_PROGRAM_ID } from '@solana/spl-token';
+import {
+  NATIVE_MINT, TOKEN_PROGRAM_ID, createAssociatedTokenAccountIdempotentInstruction, getAssociatedTokenAddressSync,
+} from '@solana/spl-token';
 import {
   ComputeBudgetProgram, Connection, Keypair, PublicKey, SystemProgram, Transaction,
   sendAndConfirmTransaction, type Signer,
 } from '@solana/web3.js';
 import BN from 'bn.js';
+
+const bs58 = utils.bytes.bs58;
 
 export const DBC_PROGRAM_ID = new PublicKey('dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN');
 export const DAMM_PROGRAM_ID = new PublicKey('cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG');
@@ -70,7 +74,6 @@ export function gameAddresses(mint: PublicKey) {
     wsolVault: pda([Buffer.from('wsol'), game.toBuffer()]),
     stash: pda([Buffer.from('stash'), game.toBuffer()]),
     round: (id: number | bigint) => pda([Buffer.from('round'), game.toBuffer(), u64le(id)]),
-    player: (round: PublicKey, owner: PublicKey) => pda([Buffer.from('player'), round.toBuffer(), owner.toBuffer()]),
   };
 }
 
@@ -151,6 +154,15 @@ export async function send(connection: Connection, tx: Transaction, signers: Sig
   return sendAndConfirmTransaction(connection, tx, signers, { commitment: 'confirmed' });
 }
 
+/** Round rules, as stored on-chain (see Params in lib.rs). */
+export type GameParams = {
+  minBuyLamports: BN;     // smallest buy that counts
+  timeAddPerBuy: BN;      // seconds each counted buy adds
+  maxTimer: BN;           // countdown cap after the latest buy
+  initialTimer: BN;       // countdown when a round opens
+  settleGraceSecs: BN;    // wait after zero before settling, for late-reported buys
+};
+
 /**
  * Full launch: DBC config (fee claimer = treasury PDA) → pool → hand pool creator to the
  * treasury → initialize the game. The mint keypair is generated up front because every
@@ -158,11 +170,10 @@ export async function send(connection: Connection, tx: Transaction, signers: Sig
  */
 export async function launch(connection: Connection, authority: Keypair, opts: {
   launch?: Partial<LaunchOptions>;
-  params: { basePrice: BN; priceStep: BN; timeAddPerFloor: BN; maxTimer: BN; initialTimer: BN; maxFloorsPerBuy: number };
+  params: GameParams;
   keeper: PublicKey;
   maxBuybackLamports: BN;
   buybackGapSecs: BN;
-  devTokenAccount: (mint: PublicKey) => Promise<PublicKey>;
   mint?: Keypair;
 }) {
   const o = { ...DEFAULT_LAUNCH, ...opts.launch };
@@ -194,7 +205,6 @@ export async function launch(connection: Connection, authority: Keypair, opts: {
   const transferTx = await dbc.creator.transferPoolCreator({ pool, creator: authority.publicKey, newCreator: a.treasury });
   await send(connection, transferTx, [authority]);
 
-  const dev = await opts.devTokenAccount(mint.publicKey);
   const program = fomocity(connection, authority);
   await program.methods
     .initialize(opts.params, {
@@ -207,7 +217,6 @@ export async function launch(connection: Connection, authority: Keypair, opts: {
       authority: authority.publicKey,
       mint: mint.publicKey,
       quoteMint: NATIVE_MINT,
-      devTokenAccount: dev,
       game: a.game,
       treasury: a.treasury,
       vault: a.vault,
@@ -394,9 +403,35 @@ export function jitoSender(connection: Connection, payer: Keypair, baseUrl: stri
   };
 }
 
+/**
+ * Settles the current round once its countdown (plus grace) has run out. If it has a
+ * winner, the jackpot is paid to their token account in the same transaction; the account
+ * is created first if they closed it.
+ */
 export async function settle(program: Program, g: GameState, cranker: PublicKey) {
   const id = BigInt(g.data.currentRound.toString());
-  return program.methods.settle().accountsStrict({
-    cranker, game: g.game, round: g.round(id), nextRound: g.round(id + 1n), systemProgram: SystemProgram.programId,
-  }).rpc();
+  const round: any = await (program.account as any).round.fetch(g.round(id));
+  const hasWinner = round.buyCount > 0;
+  const winnerAta = hasWinner ? getAssociatedTokenAddressSync(g.mint, round.lastBuyer, true) : null;
+  const builder = program.methods.settle().accountsStrict({
+    cranker, game: g.game, mint: g.mint, round: g.round(id), nextRound: g.round(id + 1n), vault: g.vault,
+    // null = no winner: Anchor passes the optional account as absent.
+    winnerTokenAccount: winnerAta as any, tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
+  });
+  if (hasWinner) {
+    builder.preInstructions([
+      createAssociatedTokenAccountIdempotentInstruction(cranker, winnerAta!, round.lastBuyer, g.mint),
+    ]);
+  }
+  return builder.rpc();
+}
+
+/** Keeper: report one qualifying buy (from the tracker) to the program. */
+export async function recordBuy(program: Program, keeper: Keypair, g: GameState, t: { wallet: string; lamports: string; time: number | null; sig: string }) {
+  const id = BigInt(g.data.currentRound.toString());
+  return program.methods
+    .recordBuy(new PublicKey(t.wallet), new BN(t.lamports), new BN(t.time ?? 0), [...bs58.decode(t.sig)])
+    .accountsStrict({ keeper: keeper.publicKey, game: g.game, round: g.round(id) })
+    .signers([keeper])
+    .rpc();
 }
