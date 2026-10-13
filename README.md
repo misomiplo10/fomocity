@@ -36,7 +36,6 @@ The same client talks to the real program when given a cluster and a game mint:
 
 ```
 http://localhost:5173/?cluster=localnet&mint=<mint printed by npm run launch>
-http://localhost:5173/?cluster=devnet&mint=<mint>
 ```
 
 Players connect a wallet, swap SOL for FOMO on the live Meteora pool from the side panel
@@ -95,20 +94,23 @@ cd scripts && npm install
 | `npm run launch` | Creates the DBC config and pool, hands pool creator to the treasury, initializes the game. Env: `RPC_URL`, `AUTHORITY`, `KEEPER_PUBKEY`, optional `FLOOR_PRICE_SOL`, `SECS_PER_FLOOR`, `MAX_TIMER_SECS`, `MIGRATION_SOL`, `MAX_BUYBACK_SOL`, `BUYBACK_GAP_SECS`, `DEV_WALLET`, `TOKEN_*`. |
 | `npm run keeper` | Loop: settle expired rounds, harvest, migrate if Meteora's keepers haven't, buy back (skips while the swap fee is above `MAX_FEE_BPS`). Env: `RPC_URL`, `KEEPER`, `MINT`, optional `JITO_URL` + `JITO_TIP_LAMPORTS` to send buybacks privately through Jito (not yet tested against a live block engine). |
 
-### Devnet
+### Mainnet launch
 
-Meteora's DBC and DAMM v2 use the same program IDs on devnet. You need about 6 devnet SOL
-(program deploy ≈ 4.3, launch and keeper fees the rest) from https://faucet.solana.com.
+There's no devnet stage. `npm run test:localnet` and `npm run test:rounds` already run against
+Meteora's real mainnet program bytecode. Budget about 5 SOL: program deploy ≈ 4.3 SOL rent
+(refundable if the program is ever closed), plus launch and keeper fees. Use a paid RPC.
 
 ```bash
-solana config set -u devnet
-solana program deploy target/deploy/fomocity.so --program-id target/deploy/fomocity-keypair.json
+cd programs/fomocity && cargo build-sbf --tools-version v1.53 && cd ../..
+solana program deploy -u <rpc> target/deploy/fomocity.so --program-id target/deploy/fomocity-keypair.json
 cd scripts
-RPC_URL=https://api.devnet.solana.com AUTHORITY=~/.config/solana/id.json KEEPER_PUBKEY=<keeper> npm run launch
-RPC_URL=https://api.devnet.solana.com KEEPER=<keeper.json> MINT=<mint> npm run keeper
+RPC_URL=<rpc> AUTHORITY=<wallet.json> KEEPER_PUBKEY=<keeper> npm run launch                     # prints the plan, sends nothing
+RPC_URL=<rpc> AUTHORITY=<wallet.json> KEEPER_PUBKEY=<keeper> CONFIRM_MAINNET=yes npm run launch  # launches
+RPC_URL=<rpc> KEEPER=<keeper.json> MINT=<mint> JITO_URL=https://mainnet.block-engine.jito.wtf npm run keeper
 ```
 
-Then open `/?cluster=devnet&mint=<mint>` with a wallet set to devnet.
+Build the site with `VITE_CLUSTER=mainnet VITE_RPC_URL=<rpc> VITE_MINT=<mint> npm run build`.
+Keep `target/deploy/fomocity-keypair.json` (the program ID) safe and out of git.
 
 ### Admin
 
@@ -129,8 +131,7 @@ The default tools in Solana CLI 3.0 ship Cargo 1.84, which can't build them.
 ## Before mainnet (not done yet)
 
 - [x] `web/src/solana.js` backend (tested on localnet in the browser with the burner wallet).
-- [ ] Devnet dry run of `launch.ts` + `keeper.ts`, with the real 85 SOL threshold (needs devnet SOL; the faucet rate-limits scripts).
-- [ ] Test injected wallets (Phantom etc.) by hand; only the burner path is automated.
+- [ ] Test Phantom / Backpack / Solflare by hand on the mainnet build before announcing; only the burner path is automated.
 - [ ] Host the keeper with alerting (it's a long-running Node process).
 - [ ] Decide the migration threshold. Meteora's keepers auto-migrate SOL pools at exactly 10 SOL (the "equals vs at least" rule is unverified). Otherwise our keeper migrates; it's permissionless.
 - [ ] Turn on Jito sending for buybacks (`JITO_URL`) and verify it on mainnet with a tiny buyback.
