@@ -43,7 +43,8 @@
           <li>A buy counts when it puts at least <b data-p="minBuy"></b> into FOMO's Meteora pool, from any app or aggregator. Sells never count.</li>
           <li>Each counted buy adds <b data-p="timeAdd"></b> to the countdown, which is capped at <b data-p="maxTimer"></b>. A round lasts <b data-p="maxTimer"></b> if nobody buys, and keeps going as long as people keep buying.</li>
           <li>When the countdown reaches zero, the <b>last counted buyer wins the entire jackpot</b>.</li>
-          <li>The jackpot is paid <b>automatically</b> to the winner's wallet in the same on-chain step that ends the round.</li>
+          <li data-mode="program">The jackpot is paid <b>automatically</b> to the winner's wallet in the same on-chain step that ends the round.</li>
+          <li data-mode="custodial" hidden>The jackpot is sent <b>automatically</b> to the winner's wallet by the game's payout software within seconds of the round ending, with the note "FOMO City round N payout" so anyone can find it on Solscan.</li>
           <li>Buys that land after zero don't count for that round. There's a short <b data-p="grace"></b> window after zero so buys made just before it are still recorded before the round closes.</li>
           <li>Buys are ordered by when they happened on-chain. Buys in the same second are ordered as the game's keeper sees them.</li>
           <li>The game's own buybacks never count as a player buy.</li>
@@ -56,7 +57,7 @@
         <h2>Where the jackpot comes from</h2>
         <p>FOMO was launched by its creator on Meteora, and its trading fees go to the creator, not to the game. The jackpot is <b>funded by top-ups</b> from the creator and anyone else who wants a bigger prize:</p>
         <ul>
-          <li><b>SOL</b> sent to the game is used by the keeper to buy FOMO, split like this:</li>
+          <li><b>SOL</b> sent to the game's jackpot wallet is used to buy FOMO, split like this:</li>
         </ul>
         <div class="split">
           <div><big data-s="jackpot"></big><span>this round's jackpot</span></div>
@@ -64,8 +65,9 @@
           <div><big data-s="burn"></big><span>burned forever</span></div>
         </div>
         <ul>
-          <li><b>FOMO</b> sent to the game goes straight into the current round's jackpot (or the next round's, if the clock already hit zero).</li>
+          <li><b>FOMO</b> sent to the jackpot wallet goes straight into the current round's jackpot (or the next round's, if the clock already hit zero).</li>
         </ul>
+        <p>The jackpot wallet's address is shown on the main page, in the token box at the bottom right.</p>
         <p>Every top-up is recorded on-chain and shown in the live feed.</p>
       </section>
 
@@ -90,7 +92,19 @@
         </ul>
       </section>
 
-      <section>
+      <section data-mode="custodial" hidden>
+        <h2>What you can check, and what you trust</h2>
+        <p><b>FOMO City doesn't use a smart contract to hold the pot.</b> The jackpot sits in an ordinary Solana wallet, the jackpot wallet, run by the game operator's software. Be clear about what that means:</p>
+        <ul>
+          <li><b>You are trusting the operator.</b> Whoever controls the jackpot wallet could, in principle, move the pot instead of paying the winner. Nothing on-chain prevents that.</li>
+          <li><b>Everything is visible.</b> The jackpot wallet's balance and every transaction in and out of it are public on Solscan. Every counted buy is listed with its transaction, and every payout carries the note "FOMO City round N payout".</li>
+          <li><b>The software can miss things.</b> It watches Meteora for buys; if it's down or slow, a buy might not be counted in time.</li>
+          <li><b>Meteora can pause the pool</b> after graduation; buys and buybacks would stop until it resumes.</li>
+        </ul>
+        <p>If any of that is a deal-breaker, don't play.</p>
+      </section>
+
+      <section data-mode="program">
         <h2>What you can check, and what you trust</h2>
         <p>The game runs as an open-source Solana program. Everything below is public on-chain:</p>
         <ul>

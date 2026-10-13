@@ -18,3 +18,10 @@ for (const el of document.querySelectorAll('[data-s]')) el.textContent = `${G.BU
 // "funded by top-ups" explanation instead of the fee-buyback one.
 const funding = import.meta.env.VITE_JACKPOT_FUNDING === 'creator' ? 'creator' : 'fees';
 for (const el of document.querySelectorAll('[data-funding]')) el.hidden = el.dataset.funding !== funding;
+
+// VITE_GAME_MODE=custodial for the no-program setup (jackpot held by the game server's
+// wallet): swaps in the matching payout rule and the trust section. It implies the
+// creator-funded jackpot explanation.
+const mode = import.meta.env.VITE_GAME_MODE === 'custodial' ? 'custodial' : 'program';
+for (const el of document.querySelectorAll('[data-mode]')) el.hidden = el.dataset.mode !== mode;
+if (mode === 'custodial') for (const el of document.querySelectorAll('[data-funding]')) el.hidden = el.dataset.funding !== 'creator';

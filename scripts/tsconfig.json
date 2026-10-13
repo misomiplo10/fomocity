@@ -8,7 +8,10 @@
     "skipLibCheck": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "allowJs": true
   },
-  "include": ["*.ts"]
+  "include": [
+    "*.ts"
+  ]
 }

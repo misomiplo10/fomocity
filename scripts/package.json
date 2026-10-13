@@ -11,7 +11,9 @@
     "test:tracker": "tsx tracker.test.ts",
     "attach": "tsx attach.ts",
     "fund": "tsx fund.ts",
-    "test:external": "tsx external.test.ts"
+    "test:external": "tsx external.test.ts",
+    "game": "tsx game-server.ts",
+    "test:custodial": "tsx custodial.test.ts"
   },
   "dependencies": {
     "@coral-xyz/anchor": "0.31.1",

@@ -7,10 +7,10 @@
 // It backfills from the pools' history on start, then follows them live over the RPC
 // websocket. Already-recorded signatures are skipped, so restarts are safe.
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
-import { deriveDammV2PoolAuthority, deriveDbcPoolAuthority } from '@meteora-ag/dynamic-bonding-curve-sdk';
+import { deriveDammV2PoolAddress, deriveDammV2PoolAuthority, deriveDbcPoolAuthority } from '@meteora-ag/dynamic-bonding-curve-sdk';
 import { NATIVE_MINT } from '@solana/spl-token';
 import { Connection, Keypair, PublicKey, type VersionedTransactionResponse } from '@solana/web3.js';
-import { fomocity, gameAddresses, readGame, redactUrl, rpcUrl } from './lib.ts';
+import { findLaunch, fomocity, gameAddresses, readGame, redactUrl, rpcUrl } from './lib.ts';
 
 export type Trade = {
   sig: string;
@@ -81,23 +81,44 @@ export function parseTrades(
 }
 
 /** Watches the game's pools and calls `onTrade` for each new trade, oldest first. */
-export async function track(connection: Connection, mint: PublicKey, onTrade: (t: Trade) => void, opts: { seen?: Set<string>; live?: boolean } = {}) {
-  const program = fomocity(connection, Keypair.generate());
-  const g = await readGame(program, mint);
+export type TrackOptions = {
+  seen?: Set<string>;
+  live?: boolean;
+  /** Pools to watch. Default: read them from the on-chain game account for this mint. */
+  pools?: { dbcPool: PublicKey; dammPool: PublicKey };
+  /** Wallets whose buys are the game's own (flagged `game: true`, never a player). */
+  gameOwners?: PublicKey[];
+};
+
+/** The game's pools straight from the token: its Meteora DBC pool and the DAMM v2 pool it graduates into. */
+export async function poolsForMint(connection: Connection, mint: PublicKey) {
+  const launch = await findLaunch(connection, mint);
+  return { dbcPool: launch.pool, dammPool: deriveDammV2PoolAddress(launch.dammConfig, mint, NATIVE_MINT) };
+}
+
+export async function track(connection: Connection, mint: PublicKey, onTrade: (t: Trade) => void, opts: TrackOptions = {}) {
+  let pools = opts.pools;
+  let owners = opts.gameOwners?.map((k) => k.toBase58()) ?? [];
+  if (!pools) {
+    const g = await readGame(fomocity(connection, Keypair.generate()), mint);
+    pools = { dbcPool: g.data.dbcPool, dammPool: g.data.dammPool };
+    owners = owners.concat(gameAddresses(mint).treasury.toBase58(), gameAddresses(mint).game.toBase58());
+  }
+  const { dbcPool: dbcKey, dammPool: dammKey } = pools;
   const { DynamicBondingCurveClient } = await import('@meteora-ag/dynamic-bonding-curve-sdk');
   const { CpAmm } = await import('@meteora-ag/cp-amm-sdk');
-  const dbcPool = (await new DynamicBondingCurveClient(connection, 'confirmed').state.getPool(g.data.dbcPool))!.poolState;
-  const gameOwners = new Set([gameAddresses(mint).treasury.toBase58(), gameAddresses(mint).game.toBase58()]);
+  const dbcPool = (await new DynamicBondingCurveClient(connection, 'confirmed').state.getPool(dbcKey))!.poolState;
+  const gameOwners = new Set(owners);
   const seen = opts.seen ?? new Set<string>();
 
   type Venue = { pool: PublicKey; quoteVault: PublicKey; venue: Trade['venue'] };
-  const venues: Venue[] = [{ pool: g.data.dbcPool, quoteVault: dbcPool.quoteVault, venue: 'dbc' }];
+  const venues: Venue[] = [{ pool: dbcKey, quoteVault: dbcPool.quoteVault, venue: 'dbc' }];
   const addDamm = async () => {
     if (venues.some((v) => v.venue === 'damm')) return;
-    const info = await connection.getAccountInfo(g.data.dammPool);
+    const info = await connection.getAccountInfo(dammKey);
     if (!info) return; // not migrated yet
-    const ps = await new CpAmm(connection).fetchPoolState(g.data.dammPool);
-    const v: Venue = { pool: g.data.dammPool, quoteVault: ps.tokenBVault, venue: 'damm' };
+    const ps = await new CpAmm(connection).fetchPoolState(dammKey);
+    const v: Venue = { pool: dammKey, quoteVault: ps.tokenBVault, venue: 'damm' };
     venues.push(v);
     await backfill(v);
     if (opts.live) subscribe(v);
@@ -154,5 +175,5 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     appendFileSync(out, JSON.stringify(t) + '\n');
     const sol = (Number(t.lamports) / 1e9).toFixed(4);
     console.log(`${t.side.toUpperCase()} ${t.wallet} ${sol} SOL ${t.venue}${t.game ? ' (game buyback)' : ''} ${t.sig}`);
-  }, { seen, live: true });
+  }, { seen, live: true, pools: process.env.TRACK_BY_CA ? await poolsForMint(new Connection(url, 'confirmed'), mint) : undefined });
 }

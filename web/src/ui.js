@@ -27,6 +27,10 @@ export function createUI({ backend, camera, plaza }) {
   // Attached to a token launched elsewhere: its trading fees go to its creator, so the
   // jackpot is funded by top-ups (SOL is bought back 70/20/10, FOMO goes straight in).
   const external = !!MI.external;
+  // No-program setup: the jackpot sits in an ordinary wallet run by the game operator.
+  const custodial = !!MI.custodial;
+  const jackpotWallet = backend.jackpotWallet ?? null;
+  const txLink = (sig) => (chain && sig ? `https://solscan.io/tx/${sig}` : null);
   const mint = backend.mint ?? null;
   // Links out to explorers and a swap page. The site itself never moves funds.
   const walletLink = (w) => (chain && w ? `https://solscan.io/account/${w}` : null);
@@ -69,7 +73,8 @@ export function createUI({ backend, camera, plaza }) {
       <h3>Token CA</h3>
       ${mint
         ? `<div class="ca"><code id="ca" title="${esc(mint)}">${esc(mint)}</code><button id="copyca" title="Copy token address">COPY</button></div>
-           <a class="ext" href="https://jup.ag/swap/SOL-${esc(mint)}" target="_blank" rel="noopener">Trade on Jupiter ↗</a>`
+           <a class="ext" href="https://jup.ag/swap/SOL-${esc(mint)}" target="_blank" rel="noopener">Trade on Jupiter ↗</a>
+           ${custodial && jackpotWallet ? `<a class="jw" href="${walletLink(jackpotWallet) ?? '#'}" target="_blank" rel="noopener">Jackpot wallet: ${esc(short(jackpotWallet))} ↗</a>` : ''}`
         : `<div class="ca soon"><code>Launching soon</code></div>`}
     </div>
     <div id="labels"></div>
@@ -85,12 +90,19 @@ export function createUI({ backend, camera, plaza }) {
       <li>A buy counts when it puts at least <b>${G.fmtSol(P.minBuyLamports, 2)}</b> into the token's Meteora pool. Sells never count.</li>
       <li>Every counted buy adds <b>${P.timeAddPerBuy}s</b> to the countdown, which never shows more than <b>${clock(P.maxTimer)}</b>.</li>
       <li>When it hits zero, the <b>last buyer wins the whole jackpot</b>. It's sent to their wallet automatically; no claiming. Everyone else gets nothing from the round.</li>
-      ${external
+      ${custodial
+        ? `<li><b>The jackpot is held in the game's jackpot wallet${jackpotWallet ? ` (${walletLink(jackpotWallet) ? `<a href="${walletLink(jackpotWallet)}" target="_blank" rel="noopener">${esc(short(jackpotWallet))}</a>` : esc(short(jackpotWallet))})` : ''}</b> and paid out by the game operator's software, <b>not by a smart contract</b>. You are trusting the operator to pay winners. The wallet's balance and every payout are public on Solscan.</li>
+      <li>The jackpot is <b>funded by the token's creator and the community</b>, not automatically by trading fees. Anyone can top it up by sending SOL or FOMO to the jackpot wallet: SOL is used to buy FOMO back (<b>${G.BUYBACK_SPLIT.jackpot / 100}%</b> to this round's jackpot · <b>${G.BUYBACK_SPLIT.nextRound / 100}%</b> to the next round · <b>${G.BUYBACK_SPLIT.burn / 100}%</b> burned), and FOMO goes straight into the jackpot.</li>`
+        : external
         ? `<li>The jackpot is <b>funded by the token's creator and the community</b>, not automatically by trading fees. Anyone can top it up: SOL sent to the game is used to buy FOMO back (<b>${G.BUYBACK_SPLIT.jackpot / 100}%</b> to this round's jackpot · <b>${G.BUYBACK_SPLIT.nextRound / 100}%</b> to the next round · <b>${G.BUYBACK_SPLIT.burn / 100}%</b> burned), and FOMO sent to the game goes straight into the jackpot.</li>`
         : `<li>The jackpot comes from <b>Meteora trading fees</b>: the game collects 80% of them in SOL (Meteora keeps 20%) and buys FOMO back: <b>${G.BUYBACK_SPLIT.jackpot / 100}%</b> to this round's jackpot · <b>${G.BUYBACK_SPLIT.nextRound / 100}%</b> to the next round · <b>${G.BUYBACK_SPLIT.burn / 100}%</b> burned.</li>
       <li>Launch fees start at <b>${MI.sniperFeeBps / 100}%</b>${MI.baseFeeBps ? ` and fall to <b>${MI.baseFeeBps / 100}%</b>` : ' and fall over the first minutes'}, so early snipers pay into the pot.</li>`}
-      <li>The token trades on a Meteora bonding curve, then in a regular pool whose liquidity is <b>locked forever</b>.</li>
-      <li>Buys are spotted on-chain by the game's keeper and recorded in an open-source program together with their transaction signature, so anyone can check every recorded buy and every payout.</li>
+      ${external
+        ? `<li>The token trades on Meteora: first on a bonding curve, then in a regular Meteora pool.</li>`
+        : `<li>The token trades on a Meteora bonding curve, then in a regular pool whose liquidity is <b>locked forever</b>.</li>`}
+      ${custodial
+        ? `<li>The game's software spots buys on-chain and lists every counted buy and every payout with its transaction, so anyone can check them.</li>`
+        : `<li>Buys are spotted on-chain by the game's keeper and recorded in an open-source program together with their transaction signature, so anyone can check every recorded buy and every payout.</li>`}
       <li>A round with no buys carries its jackpot into the next one.</li>
     </ul>
     <p class="hint">${backend.mode === 'sim' ? 'SIM MODE: bots and fake tokens, 90-second rounds. Nothing here is real money.'
@@ -164,7 +176,7 @@ export function createUI({ backend, camera, plaza }) {
 
       const winners = (backend.winners ?? []).slice(0, 6);
       const wHtml = winners.length
-        ? winners.map((w) => `<li><span class="r">#${w.round}</span> ${nameHtml(w.wallet)} <span>${G.fmt(w.amount)}</span><small>${ago(w.ts)}</small></li>`).join('')
+        ? winners.map((w) => `<li><span class="r">#${w.round}</span> ${nameHtml(w.wallet)} <span>${txLink(w.sig) ? `<a href="${txLink(w.sig)}" target="_blank" rel="noopener" title="Payout transaction">${G.fmt(w.amount)}</a>` : G.fmt(w.amount)}</span><small>${ago(w.ts)}${custodial && !w.sig && w.amount > 0 ? ' · paying…' : ''}</small></li>`).join('')
         : '<li class="dim">No winners yet</li>';
       if (wHtml !== lastWinners) { $('#winners').innerHTML = wHtml; lastWinners = wHtml; }
 

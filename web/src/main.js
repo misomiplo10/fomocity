@@ -56,7 +56,18 @@ pipeline.outputNode = col.add(glow);
 // ?cluster=localnet|devnet (+ &mint=) or VITE_CLUSTER switches to the chain backend; the
 // Solana libraries are only loaded in that case, so sim mode stays light.
 const cfg = chainConfig();
-const backend = cfg ? await (await import('./solana.js')).createChain(cfg) : createSim();
+let backend;
+try {
+  backend = !cfg ? createSim()
+    : cfg.kind === 'custodial' ? await (await import('./custodial.js')).createCustodial(cfg)
+    : await (await import('./solana.js')).createChain(cfg);
+} catch (e) {
+  // Never fall back to the simulation when a real game is configured: fake bots would
+  // look like real players.
+  console.error(e);
+  document.body.insertAdjacentHTML('beforeend', `<div class="offline">The game server isn't reachable right now. Please try again in a minute.</div>`);
+  throw e;
+}
 const ui = createUI({ backend, camera, renderer, plaza, controls });
 ui.setRenderer(renderer.backend.isWebGPUBackend ? 'WebGPU' : 'WebGL2');
 

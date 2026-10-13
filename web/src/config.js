@@ -1,4 +1,7 @@
-// Which backend to run. No cluster, or no mint yet → the local simulator.
+// Which backend to run.
+//  - VITE_API_URL set (or ?api= off mainnet) → the game server's API (no-program setup).
+//  - VITE_CLUSTER + VITE_MINT → read the on-chain game program directly.
+//  - Otherwise, or no mint yet → the local simulator ("Launching soon").
 //
 // Dev / devnet: ?cluster=localnet&mint=<game mint>  (optionally &rpc=<url>)
 // Production: set VITE_CLUSTER, VITE_RPC_URL and VITE_MINT at build time. On mainnet the
@@ -14,6 +17,8 @@ export function chainConfig(search = location.search) {
   const q = new URLSearchParams(search);
   const env = import.meta.env ?? {};
   const cluster = env.VITE_CLUSTER || q.get('cluster');
+  const apiUrl = env.VITE_API_URL || (cluster !== 'mainnet' ? q.get('api') : null);
+  if (apiUrl) return { kind: 'custodial', apiUrl, cluster: cluster || 'mainnet' };
   if (!cluster) return null;
   if (!(cluster in DEFAULT_RPC)) throw new Error(`unknown cluster "${cluster}"`);
   const locked = cluster === 'mainnet';
@@ -23,5 +28,5 @@ export function chainConfig(search = location.search) {
   // No token yet (e.g. Vercel is configured before launch): keep showing the simulation
   // with "Launching soon" instead of breaking the site.
   if (!mint) return null;
-  return { cluster, rpcUrl, mint };
+  return { kind: 'program', cluster, rpcUrl, mint };
 }

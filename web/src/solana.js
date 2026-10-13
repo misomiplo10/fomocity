@@ -150,7 +150,7 @@ export async function createChain(cfg) {
         const slot = await connection.getSlot();
         const point = ps.activationType === 0 ? new BN(slot) : new BN(Math.floor(now()));
         const q = cp.getQuote2({ inputTokenMint: NATIVE_MINT, slippage: 1, currentPoint: point, poolState: ps, tokenADecimal: 6, tokenBDecimal: 9, hasReferral: false, swapMode: DammSwapMode.ExactIn, amountIn: probe });
-        market.feeBps = num(q.tradingFee.add(q.protocolFee)) * 10_000 / num(probe);
+        market.feeBps = num(q.includedFeeInputAmount.sub(q.excludedFeeInputAmount)) * 10_000 / num(probe); // total fee
       } catch {}
     } else {
       market.price = Number(dbcPrice(pool.sqrtPrice, 6, 9));
