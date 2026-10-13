@@ -32,6 +32,7 @@ export const DAMM_V2_CONFIGS: Record<number, PublicKey> = {
   [MigrationFeeOption.FixedBps200]: new PublicKey('2c4cYd4reUYVRAB9kUUkrq55VPyy2FNQ3FDL4o12JXmq'),
   [MigrationFeeOption.FixedBps400]: new PublicKey('AkmQWebAwFvWk55wBoCr5D62C6VVDTzi84NJuD9H7cFD'),
   [MigrationFeeOption.FixedBps600]: new PublicKey('DbCRBj8McvPYHJG1ukj8RE15h2dCNUdTAESG49XpQ44u'),
+  [MigrationFeeOption.Customizable]: new PublicKey('A8gMrEPJkacWkcb3DGwtJwTe16HktSEfvwtuDh2MCtck'),
 };
 
 const root = (p: string) => fileURLToPath(new URL(`../${p}`, import.meta.url));
@@ -231,6 +232,92 @@ export async function launch(connection: Connection, authority: Keypair, opts: {
     .rpc();
 
   return { mint: mint.publicKey, config: config.publicKey, pool, ...a };
+}
+
+/**
+ * Attach the game to a token someone else already launched on Meteora DBC (paired with
+ * SOL, plain SPL token). The pool's fees don't go to the game; the jackpot is funded with
+ * fundSol / fundJackpot instead.
+ */
+export async function attach(connection: Connection, authority: Keypair, opts: {
+  mint: PublicKey;
+  params: GameParams;
+  keeper: PublicKey;
+  maxBuybackLamports: BN;
+  buybackGapSecs: BN;
+}) {
+  const info = await findLaunch(connection, opts.mint);
+  const a = gameAddresses(opts.mint);
+  const program = fomocity(connection, authority);
+  await program.methods
+    .initializeExternal(opts.params, {
+      keeper: opts.keeper,
+      maxLamports: opts.maxBuybackLamports,
+      minGapSecs: opts.buybackGapSecs,
+      dammConfig: info.dammConfig,
+    })
+    .accountsStrict({
+      authority: authority.publicKey,
+      mint: opts.mint,
+      quoteMint: NATIVE_MINT,
+      game: a.game,
+      treasury: a.treasury,
+      vault: a.vault,
+      wsolVault: a.wsolVault,
+      stash: a.stash,
+      round: a.round(1),
+      dbcPool: info.pool,
+      dbcConfig: info.config,
+      tokenProgram: TOKEN_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
+    })
+    .rpc();
+  return { mint: opts.mint, pool: info.pool, config: info.config, ...a };
+}
+
+/** Finds a token's Meteora DBC pool and checks the game can attach to it. */
+export async function findLaunch(connection: Connection, mint: PublicKey) {
+  const mintInfo = await connection.getAccountInfo(mint);
+  if (!mintInfo) throw new Error(`no token at ${mint.toBase58()}`);
+  if (!mintInfo.owner.equals(TOKEN_PROGRAM_ID) || mintInfo.data.length !== 82) {
+    throw new Error('token is not a plain SPL token (Token-2022 tokens are not supported); launch with Token type: SPL Token');
+  }
+  const dbc = new DynamicBondingCurveClient(connection, 'confirmed');
+  const found = await dbc.state.getPoolByBaseMint(mint);
+  if (!found) throw new Error('no Meteora DBC pool found for this token');
+  const config = await dbc.state.getPoolConfig(found.account.poolState.config);
+  if (!config) throw new Error('DBC pool config not found');
+  if (!config.quoteMint.equals(NATIVE_MINT)) throw new Error('pool is not paired with SOL');
+  const dammConfig = DAMM_V2_CONFIGS[config.migrationFeeOption];
+  if (!dammConfig) throw new Error(`unsupported migration fee option ${config.migrationFeeOption}`);
+  return {
+    pool: found.publicKey,
+    config: found.account.poolState.config,
+    dammConfig,
+    migrated: found.account.poolState.isMigrated === 1,
+    feeClaimer: config.feeClaimer,
+    creator: found.account.poolState.creator,
+  };
+}
+
+/** Anyone: send SOL to the game's buyback wallet (the keeper turns it into jackpot). */
+export async function fundSol(program: Program, funder: Keypair, g: GameState, lamports: BN) {
+  return program.methods.fundSol(lamports)
+    .accountsStrict({ funder: funder.publicKey, game: g.game, wsolVault: g.wsolVault, tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId })
+    .signers([funder])
+    .rpc();
+}
+
+/** Anyone: add FOMO from the funder's wallet straight to the jackpot. */
+export async function fundJackpot(program: Program, funder: Keypair, g: GameState, amount: BN) {
+  const id = BigInt(g.data.currentRound.toString());
+  return program.methods.fundJackpot(amount)
+    .accountsStrict({
+      funder: funder.publicKey, game: g.game, mint: g.mint, round: g.round(id),
+      funderTokenAccount: getAssociatedTokenAddressSync(g.mint, funder.publicKey), vault: g.vault, tokenProgram: TOKEN_PROGRAM_ID,
+    })
+    .signers([funder])
+    .rpc();
 }
 
 // ---------- keeper actions ----------

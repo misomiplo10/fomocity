@@ -49,42 +49,67 @@ pub mod fomocity {
     /// pre-generate the mint keypair → derive game + treasury → create DBC config with
     /// fee_claimer = treasury → create pool → transfer_pool_creator(treasury) → initialize.
     pub fn initialize(ctx: Context<Initialize>, params: Params, buyback: BuybackConfig) -> Result<()> {
-        require!(params.min_buy_lamports > 0 && params.time_add_per_buy >= 0, FomoError::BadParams);
-        require!(params.initial_timer > 0 && params.initial_timer <= params.max_timer, FomoError::BadParams);
-        require!(params.settle_grace_secs >= 0, FomoError::BadParams);
-        require!(buyback.max_lamports > 0 && buyback.min_gap_secs >= 0, FomoError::BadParams);
-        // Plain mints only: Token-2022 extensions like transfer fees or hooks would make
-        // the vault receive less than we account for and drain later claimers.
-        require!(ctx.accounts.mint.to_account_info().data_len() == 82, FomoError::UnsupportedMint);
-
         let treasury = ctx.accounts.treasury.key();
+        check_pool(&ctx.accounts)?;
         {
             let pool = ctx.accounts.dbc_pool.load()?;
-            let s = &pool.pool_state;
-            require_keys_eq!(s.base_mint, ctx.accounts.mint.key(), FomoError::WrongPool);
-            require_keys_eq!(s.config, ctx.accounts.dbc_config.key(), FomoError::WrongPool);
-            require_keys_eq!(s.creator, treasury, FomoError::TreasuryNotCreator);
+            require_keys_eq!(pool.pool_state.creator, treasury, FomoError::TreasuryNotCreator);
             let cfg = ctx.accounts.dbc_config.load()?;
-            require_keys_eq!(cfg.quote_mint, WSOL_MINT, FomoError::WrongPool);
             require_keys_eq!(cfg.fee_claimer, treasury, FomoError::TreasuryNotFeeClaimer);
             require!(cfg.collect_fee_mode == DBC_COLLECT_FEE_QUOTE_TOKEN, FomoError::WrongPool);
         }
+        init_game(ctx, params, buyback, false)
+    }
 
-        let game = &mut ctx.accounts.game;
-        game.authority = ctx.accounts.authority.key();
-        game.mint = ctx.accounts.mint.key();
-        game.params = params;
-        game.current_round = 1;
-        game.bump = ctx.bumps.game;
-        game.vault_bump = ctx.bumps.vault;
-        game.treasury_bump = ctx.bumps.treasury;
-        game.dbc_pool = ctx.accounts.dbc_pool.key();
-        game.dbc_config = ctx.accounts.dbc_config.key();
-        game.damm_pool = damm_pool_address(&buyback.damm_config, &game.mint);
-        game.buyback = buyback;
+    /// Attach the game to a token someone else already launched on Meteora DBC. The pool's
+    /// fees don't go to the game, so the `harvest_*` instructions won't work; the jackpot is
+    /// funded with `fund_sol` (bought back by the keeper, 70/20/10) and `fund_jackpot`.
+    pub fn initialize_external(ctx: Context<Initialize>, params: Params, buyback: BuybackConfig) -> Result<()> {
+        check_pool(&ctx.accounts)?;
+        init_game(ctx, params, buyback, true)
+    }
 
+    /// Anyone: add FOMO straight to the jackpot. Goes to the current round while its
+    /// countdown is running, otherwise to the next round's seed.
+    pub fn fund_jackpot(ctx: Context<FundJackpot>, amount: u64) -> Result<()> {
+        require!(amount > 0, FomoError::BadParams);
         let now = Clock::get()?.unix_timestamp;
-        ctx.accounts.round.open(1, now, &params, 0, ctx.bumps.round);
+        let round = &mut ctx.accounts.round;
+        let live = !round.settled && now < round.end_ts;
+        if live {
+            round.jackpot = round.jackpot.checked_add(amount).ok_or(FomoError::Overflow)?;
+        } else {
+            round.next_round_pot = round.next_round_pot.checked_add(amount).ok_or(FomoError::Overflow)?;
+        }
+        token_interface::transfer_checked(
+            CpiContext::new(ctx.accounts.token_program.key(), TransferChecked {
+                from: ctx.accounts.funder_token_account.to_account_info(),
+                mint: ctx.accounts.mint.to_account_info(),
+                to: ctx.accounts.vault.to_account_info(),
+                authority: ctx.accounts.funder.to_account_info(),
+            }),
+            amount,
+            ctx.accounts.mint.decimals,
+        )?;
+        emit!(JackpotFunded { round: round.id, funder: ctx.accounts.funder.key(), tokens: amount, lamports: 0, to_current_round: live });
+        Ok(())
+    }
+
+    /// Anyone: send SOL to the game's buyback wallet. The keeper swaps it for FOMO on the
+    /// token's pool and splits it like any buyback: 70% jackpot · 20% next round · 10% burned.
+    pub fn fund_sol(ctx: Context<FundSol>, lamports: u64) -> Result<()> {
+        require!(lamports > 0, FomoError::BadParams);
+        anchor_lang::system_program::transfer(
+            CpiContext::new(ctx.accounts.system_program.key(), anchor_lang::system_program::Transfer {
+                from: ctx.accounts.funder.to_account_info(),
+                to: ctx.accounts.wsol_vault.to_account_info(),
+            }),
+            lamports,
+        )?;
+        token_interface::sync_native(CpiContext::new(ctx.accounts.token_program.key(), token_interface::SyncNative {
+            account: ctx.accounts.wsol_vault.to_account_info(),
+        }))?;
+        emit!(JackpotFunded { round: ctx.accounts.game.current_round, funder: ctx.accounts.funder.key(), tokens: 0, lamports, to_current_round: false });
         Ok(())
     }
 
@@ -415,6 +440,46 @@ pub mod fomocity {
     }
 }
 
+/// Shared by both initializers: sane params, a plain SPL mint, and a SOL-paired DBC pool
+/// for exactly this mint.
+fn check_pool(a: &Initialize) -> Result<()> {
+    // Plain mints only: Token-2022 extensions like transfer fees or hooks would make the
+    // vault receive less than we account for and drain later winners.
+    require!(a.mint.to_account_info().data_len() == 82, FomoError::UnsupportedMint);
+    let pool = a.dbc_pool.load()?;
+    let s = &pool.pool_state;
+    require_keys_eq!(s.base_mint, a.mint.key(), FomoError::WrongPool);
+    require_keys_eq!(s.config, a.dbc_config.key(), FomoError::WrongPool);
+    let cfg = a.dbc_config.load()?;
+    require_keys_eq!(cfg.quote_mint, WSOL_MINT, FomoError::WrongPool);
+    Ok(())
+}
+
+fn init_game(ctx: Context<Initialize>, params: Params, buyback: BuybackConfig, external: bool) -> Result<()> {
+    require!(params.min_buy_lamports > 0 && params.time_add_per_buy >= 0, FomoError::BadParams);
+    require!(params.initial_timer > 0 && params.initial_timer <= params.max_timer, FomoError::BadParams);
+    require!(params.settle_grace_secs >= 0, FomoError::BadParams);
+    require!(buyback.max_lamports > 0 && buyback.min_gap_secs >= 0, FomoError::BadParams);
+
+    let game = &mut ctx.accounts.game;
+    game.authority = ctx.accounts.authority.key();
+    game.mint = ctx.accounts.mint.key();
+    game.params = params;
+    game.current_round = 1;
+    game.bump = ctx.bumps.game;
+    game.vault_bump = ctx.bumps.vault;
+    game.treasury_bump = ctx.bumps.treasury;
+    game.dbc_pool = ctx.accounts.dbc_pool.key();
+    game.dbc_config = ctx.accounts.dbc_config.key();
+    game.damm_pool = damm_pool_address(&buyback.damm_config, &game.mint);
+    game.buyback = buyback;
+    game.external = external;
+
+    let now = Clock::get()?.unix_timestamp;
+    ctx.accounts.round.open(1, now, &params, 0, ctx.bumps.round);
+    Ok(())
+}
+
 fn bp(amount: u64, bps: u64) -> u64 {
     ((amount as u128) * (bps as u128) / (BPS as u128)) as u64
 }
@@ -580,6 +645,9 @@ pub struct Game {
     pub damm_pool: Pubkey,
     pub buyback: BuybackConfig,
     pub stats: FlywheelStats,
+    /// True when attached to a token launched elsewhere (no fee income; funded by
+    /// fund_sol / fund_jackpot instead of harvests).
+    pub external: bool,
     /// Ring buffers for the website: latest counted buys and latest winners.
     pub recent: [RecentBuy; RECENT_BUYS],
     pub recent_head: u8,
@@ -706,6 +774,32 @@ pub struct Settle<'info> {
     /// Funds can only ever go to an account owned by the last buyer.
     #[account(mut, token::mint = mint, token::authority = round.last_buyer, token::token_program = token_program)]
     pub winner_token_account: Option<Box<InterfaceAccount<'info, TokenAccount>>>,
+    pub token_program: Interface<'info, TokenInterface>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct FundJackpot<'info> {
+    pub funder: Signer<'info>,
+    #[account(has_one = mint)]
+    pub game: Box<Account<'info, Game>>,
+    pub mint: Box<InterfaceAccount<'info, Mint>>,
+    #[account(mut, seeds = [b"round", game.key().as_ref(), &game.current_round.to_le_bytes()], bump = round.bump)]
+    pub round: Box<Account<'info, Round>>,
+    #[account(mut, token::mint = mint, token::authority = funder, token::token_program = token_program)]
+    pub funder_token_account: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(mut, seeds = [b"vault", mint.key().as_ref()], bump = game.vault_bump)]
+    pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    pub token_program: Interface<'info, TokenInterface>,
+}
+
+#[derive(Accounts)]
+pub struct FundSol<'info> {
+    #[account(mut)]
+    pub funder: Signer<'info>,
+    pub game: Box<Account<'info, Game>>,
+    #[account(mut, seeds = [b"wsol", game.key().as_ref()], bump)]
+    pub wsol_vault: Box<InterfaceAccount<'info, TokenAccount>>,
     pub token_program: Interface<'info, TokenInterface>,
     pub system_program: Program<'info, System>,
 }
@@ -924,6 +1018,8 @@ pub struct BuyRecorded { pub round: u64, pub wallet: Pubkey, pub lamports: u64, 
 pub struct Settled { pub round: u64, pub winner: Pubkey, pub jackpot: u64, pub carry: u64 }
 #[event]
 pub struct AuthorityChanged { pub authority: Pubkey }
+#[event]
+pub struct JackpotFunded { pub round: u64, pub funder: Pubkey, pub tokens: u64, pub lamports: u64, pub to_current_round: bool }
 #[event]
 pub struct Harvested { pub venue: Venue, pub lamports: u64 }
 #[event]

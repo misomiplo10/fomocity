@@ -13,3 +13,8 @@ const values = {
 };
 for (const el of document.querySelectorAll('[data-p]')) el.textContent = values[el.dataset.p];
 for (const el of document.querySelectorAll('[data-s]')) el.textContent = `${G.BUYBACK_SPLIT[el.dataset.s] / 100}%`;
+
+// VITE_JACKPOT_FUNDING=creator for a game attached to a token launched elsewhere: shows the
+// "funded by top-ups" explanation instead of the fee-buyback one.
+const funding = import.meta.env.VITE_JACKPOT_FUNDING === 'creator' ? 'creator' : 'fees';
+for (const el of document.querySelectorAll('[data-funding]')) el.hidden = el.dataset.funding !== funding;

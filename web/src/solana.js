@@ -141,7 +141,7 @@ export async function createChain(cfg) {
     const prevPhase = market.phase;
     market.phase = pool.isMigrated === 1 ? 'damm' : pool.migrationProgress >= 1 ? 'migrating' : 'curve';
     market.raisedSol = num(pool.quoteReserve) / LAMPORTS_PER_SOL;
-    market.unclaimedSol = num(pool.partnerQuoteFee.add(pool.creatorQuoteFee)) / LAMPORTS_PER_SOL;
+    market.unclaimedSol = gameData.external ? 0 : num(pool.partnerQuoteFee.add(pool.creatorQuoteFee)) / LAMPORTS_PER_SOL;
     const probe = new BN(LAMPORTS_PER_SOL / 10);
     if (market.phase === 'damm') {
       const ps = await cp.fetchPoolState(gameData.dammPool);
@@ -195,6 +195,9 @@ export async function createChain(cfg) {
           toJackpot: num(d.toJackpot), toNext: num(d.toNext), burn: num(d.burned),
         });
         refreshMarket().catch(() => {});
+      } else if (name === 'JackpotFunded') {
+        emit({ type: 'funded', funder: d.funder.toBase58(), tokens: num(d.tokens), lamports: num(d.lamports) });
+        refreshRound().catch(() => {});
       } else if (name === 'Settled') {
         refreshRound().catch(() => {});
       }
@@ -213,6 +216,8 @@ export async function createChain(cfg) {
     mint: mint.toBase58(),
     params,
     marketInfo: {
+      // Attached to a token launched elsewhere: no fee income, jackpot funded by top-ups.
+      external: gameData.external,
       thresholdSol: market.thresholdSol,
       // Launch fee schedule as configured on the DBC pool.
       sniperFeeBps: Math.round(num(dbcConfig.poolFees.baseFee.cliffFeeNumerator) / 100_000),

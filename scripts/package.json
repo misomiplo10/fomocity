@@ -8,7 +8,10 @@
     "test:localnet": "tsx localnet.test.ts",
     "test:rounds": "tsx rounds.test.ts",
     "tracker": "tsx tracker.ts",
-    "test:tracker": "tsx tracker.test.ts"
+    "test:tracker": "tsx tracker.test.ts",
+    "attach": "tsx attach.ts",
+    "fund": "tsx fund.ts",
+    "test:external": "tsx external.test.ts"
   },
   "dependencies": {
     "@coral-xyz/anchor": "0.31.1",

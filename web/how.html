@@ -52,7 +52,24 @@
         </ul>
       </section>
 
-      <section>
+      <section data-funding="creator" hidden>
+        <h2>Where the jackpot comes from</h2>
+        <p>FOMO was launched by its creator on Meteora, and its trading fees go to the creator, not to the game. The jackpot is <b>funded by top-ups</b> from the creator and anyone else who wants a bigger prize:</p>
+        <ul>
+          <li><b>SOL</b> sent to the game is used by the keeper to buy FOMO, split like this:</li>
+        </ul>
+        <div class="split">
+          <div><big data-s="jackpot"></big><span>this round's jackpot</span></div>
+          <div><big data-s="nextRound"></big><span>next round's jackpot</span></div>
+          <div><big data-s="burn"></big><span>burned forever</span></div>
+        </div>
+        <ul>
+          <li><b>FOMO</b> sent to the game goes straight into the current round's jackpot (or the next round's, if the clock already hit zero).</li>
+        </ul>
+        <p>Every top-up is recorded on-chain and shown in the live feed.</p>
+      </section>
+
+      <section data-funding="fees">
         <h2>Where the jackpot comes from</h2>
         <p>Every trade of FOMO, buy or sell, pays a fee on Meteora. The game's treasury collects <b>80% of all those fees</b> in SOL (Meteora keeps 20%). A keeper regularly uses that SOL to buy FOMO back, and splits what it buys:</p>
         <div class="split">
@@ -63,7 +80,7 @@
         <p>So the jackpot grows with trading, whether or not anyone is playing a round. Buybacks wait until the swap fee is low, and a buyback that lands after the clock hit zero goes to the next round, so it can never change who wins.</p>
       </section>
 
-      <section>
+      <section data-funding="fees">
         <h2>The token</h2>
         <ul>
           <li><b>Launch on a bonding curve.</b> FOMO launches on Meteora's Dynamic Bonding Curve. The price starts low and rises automatically as people buy.</li>

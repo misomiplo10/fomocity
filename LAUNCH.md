@@ -79,3 +79,42 @@ The program's `initialize` checks several of these and refuses a pool that doesn
 | Smallest buyback | 0.01 SOL | `MIN_BUYBACK_LAMPORTS` |
 | Slippage on buybacks | 1% | `SLIPPAGE_BPS` |
 | Private sending | off | `JITO_URL`, `JITO_TIP_LAMPORTS` (default 0.0001 SOL) |
+
+## Attach mode: a token someone else launched
+
+Use this when the token is launched on Meteora by someone else (for example on
+launch.meteora.ag) instead of with `npm run launch`. The game attaches to it by CA.
+
+**What the launcher must choose on Meteora (DBC):**
+
+| Setting | Must be |
+| - | - |
+| Token type | **SPL Token** (not Token-2022: the game rejects Token-2022 mints) |
+| Quote token | **SOL** |
+| Everything else | Their choice (fees, curve, graduation threshold). Fees stay with them. |
+
+**Then the operator (you):**
+
+1. Deploy the program (README "Mainnet launch", deploy step).
+2. Dry run, check the plan, then attach for real:
+   ```bash
+   cd scripts && KEEPER_PUBKEY=<keeper> MINT=<token CA> npm run attach
+   cd scripts && KEEPER_PUBKEY=<keeper> MINT=<token CA> CONFIRM_MAINNET=yes npm run attach
+   ```
+   Same round settings as launch: `MIN_BUY_SOL`, `SECS_PER_BUY`, `MAX_TIMER_SECS`, `SETTLE_GRACE_SECS`,
+   `MAX_BUYBACK_SOL`, `BUYBACK_GAP_SECS`. Buys only count from the moment of attaching.
+3. Start the keeper with `MINT=<token CA>`. It skips fee harvesting in this mode.
+4. In Vercel also set `VITE_JACKPOT_FUNDING=creator`, so the guide page explains the funding
+   correctly. The game screen and rules pop-up switch automatically.
+
+**Funding the jackpot** (anyone can do it; the creator can send their trading fees):
+
+```bash
+cd scripts && FUNDER=<wallet.json> MINT=<token CA> FUND_SOL=1 npm run fund
+cd scripts && FUNDER=<wallet.json> MINT=<token CA> FUND_TOKENS=5000000 npm run fund
+```
+
+SOL goes to the game's buyback wallet; the keeper turns it into FOMO (70% jackpot · 20% next
+round · 10% burned), once the token's swap fee is below `MAX_FEE_BPS`. FOMO goes straight into
+the current round's jackpot. Both show up in the site's live feed. On mainnet both commands
+need `CONFIRM_MAINNET=yes`.

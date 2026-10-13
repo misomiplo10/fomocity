@@ -83,9 +83,12 @@ async function tick() {
 
   const pool = (await dbc.state.getPool(g.data.dbcPool))!.poolState;
   const migrated = pool.isMigrated === 1;
+  // Attached to a token launched elsewhere: the pool's fees belong to its creator, so
+  // there's nothing to harvest; the jackpot is funded with fund_sol / fund_jackpot.
+  const external = g.data.external;
   if (!migrated) {
     const owed = pool.partnerQuoteFee.add(pool.creatorQuoteFee);
-    if (owed.gte(MIN_BUYBACK)) await attempt('harvest_dbc', () => harvestDbc(program, g));
+    if (!external && owed.gte(MIN_BUYBACK)) await attempt('harvest_dbc', () => harvestDbc(program, g));
     if (pool.migrationProgress >= 1) {
       // Curve finished. Migration is permissionless; Meteora's keepers usually do it,
       // this is the fallback if they don't (e.g. a non-standard threshold).
@@ -95,8 +98,10 @@ async function tick() {
       });
     }
   } else {
-    if (!pool.isPartnerWithdrawSurplus || !pool.isCreatorWithdrawSurplus) await attempt('harvest_dbc_surplus', () => harvestDbcSurplus(program, g));
-    await attempt('harvest_damm', () => harvestDamm(program, g));
+    if (!external) {
+      if (!pool.isPartnerWithdrawSurplus || !pool.isCreatorWithdrawSurplus) await attempt('harvest_dbc_surplus', () => harvestDbcSurplus(program, g));
+      await attempt('harvest_damm', () => harvestDamm(program, g));
+    }
   }
 
   g = await readGame(program, mint);

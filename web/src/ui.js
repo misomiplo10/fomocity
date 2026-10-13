@@ -24,6 +24,9 @@ export function createUI({ backend, camera, plaza }) {
   const P = backend.params;
   const MI = backend.marketInfo ?? MARKET;
   const chain = backend.mode !== 'sim';
+  // Attached to a token launched elsewhere: its trading fees go to its creator, so the
+  // jackpot is funded by top-ups (SOL is bought back 70/20/10, FOMO goes straight in).
+  const external = !!MI.external;
   const mint = backend.mint ?? null;
   // Links out to explorers and a swap page. The site itself never moves funds.
   const walletLink = (w) => (chain && w ? `https://solscan.io/account/${w}` : null);
@@ -47,7 +50,7 @@ export function createUI({ backend, camera, plaza }) {
       <div class="hint" id="curvetxt"></div>
       <div class="row"><span>Token price</span><b id="mprice"></b></div>
       <div class="row"><span>Swap fee</span><b id="mfee"></b></div>
-      <div class="row"><span>Treasury fees</span><b id="mtreasury"></b></div>
+      <div class="row"><span>${external ? 'Jackpot funding' : 'Treasury fees'}</span><b id="mtreasury"></b></div>
       <div class="row"><span>Bought back</span><b id="mbought"></b></div>
       <div class="row"><span>Burned</span><b id="mburned"></b></div>
     </div>
@@ -82,8 +85,10 @@ export function createUI({ backend, camera, plaza }) {
       <li>A buy counts when it puts at least <b>${G.fmtSol(P.minBuyLamports, 2)}</b> into the token's Meteora pool. Sells never count.</li>
       <li>Every counted buy adds <b>${P.timeAddPerBuy}s</b> to the countdown, which never shows more than <b>${clock(P.maxTimer)}</b>.</li>
       <li>When it hits zero, the <b>last buyer wins the whole jackpot</b>. It's sent to their wallet automatically; no claiming. Everyone else gets nothing from the round.</li>
-      <li>The jackpot comes from <b>Meteora trading fees</b>: the game collects 80% of them in SOL (Meteora keeps 20%) and buys FOMO back: <b>${G.BUYBACK_SPLIT.jackpot / 100}%</b> to this round's jackpot · <b>${G.BUYBACK_SPLIT.nextRound / 100}%</b> to the next round · <b>${G.BUYBACK_SPLIT.burn / 100}%</b> burned.</li>
-      <li>Launch fees start at <b>${MI.sniperFeeBps / 100}%</b>${MI.baseFeeBps ? ` and fall to <b>${MI.baseFeeBps / 100}%</b>` : ' and fall over the first minutes'}, so early snipers pay into the pot.</li>
+      ${external
+        ? `<li>The jackpot is <b>funded by the token's creator and the community</b>, not automatically by trading fees. Anyone can top it up: SOL sent to the game is used to buy FOMO back (<b>${G.BUYBACK_SPLIT.jackpot / 100}%</b> to this round's jackpot · <b>${G.BUYBACK_SPLIT.nextRound / 100}%</b> to the next round · <b>${G.BUYBACK_SPLIT.burn / 100}%</b> burned), and FOMO sent to the game goes straight into the jackpot.</li>`
+        : `<li>The jackpot comes from <b>Meteora trading fees</b>: the game collects 80% of them in SOL (Meteora keeps 20%) and buys FOMO back: <b>${G.BUYBACK_SPLIT.jackpot / 100}%</b> to this round's jackpot · <b>${G.BUYBACK_SPLIT.nextRound / 100}%</b> to the next round · <b>${G.BUYBACK_SPLIT.burn / 100}%</b> burned.</li>
+      <li>Launch fees start at <b>${MI.sniperFeeBps / 100}%</b>${MI.baseFeeBps ? ` and fall to <b>${MI.baseFeeBps / 100}%</b>` : ' and fall over the first minutes'}, so early snipers pay into the pot.</li>`}
       <li>The token trades on a Meteora bonding curve, then in a regular pool whose liquidity is <b>locked forever</b>.</li>
       <li>Buys are spotted on-chain by the game's keeper and recorded in an open-source program together with their transaction signature, so anyone can check every recorded buy and every payout.</li>
       <li>A round with no buys carries its jackpot into the next one.</li>
@@ -113,6 +118,7 @@ export function createUI({ backend, camera, plaza }) {
   const push = (html) => { feed.insertAdjacentHTML('afterbegin', html); while (feed.children.length > 14) feed.lastChild.remove(); };
   backend.on((e) => {
     if (e.type === 'buy') push(`<li><b>${nameHtml(e.who)}</b><span>${G.fmtSol(e.lamports)}</span></li>`);
+    if (e.type === 'funded') push(`<li class="bb"><b>◆ Jackpot top-up</b><span>${e.tokens ? `+${G.fmt(e.tokens)}` : G.fmtSol(e.lamports)}</span></li>`);
     if (e.type === 'buyback') push(`<li class="bb"><b>◆ Buyback</b> ${e.sol.toFixed(3)} SOL <span>+${G.fmt(e.toJackpot)}</span></li>`);
     if (e.type === 'curveComplete' || e.type === 'migrated') {
       const done = e.type === 'migrated';
