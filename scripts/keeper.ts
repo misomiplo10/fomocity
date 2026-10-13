@@ -2,17 +2,17 @@
 // completes, and buys back with harvested SOL. Everything except the buyback is
 // permissionless; the buyback needs the keeper key stored in the game account.
 //
-//   RPC_URL=... KEEPER=~/.config/solana/keeper.json MINT=<game mint> npm run keeper
+//   KEEPER=~/.config/solana/keeper.json MINT=<game mint> npm run keeper   (RPC from scripts/.env)
 import { DynamicBondingCurveClient } from '@meteora-ag/dynamic-bonding-curve-sdk';
 import { getAccount } from '@solana/spl-token';
 import { Connection, PublicKey } from '@solana/web3.js';
 import BN from 'bn.js';
 import {
-  buybackDamm, buybackDbc, fomocity, jitoSender, harvestDamm, harvestDbc, harvestDbcSurplus, loadKeypair, readGame, send, settle,
+  buybackDamm, buybackDbc, fomocity, jitoSender, rpcUrl, harvestDamm, harvestDbc, harvestDbcSurplus, loadKeypair, readGame, send, settle,
 } from './lib.ts';
 
 const env = (k: string, d?: string) => process.env[k] ?? d ?? (() => { throw new Error(`set ${k}`); })();
-const connection = new Connection(env('RPC_URL', 'http://127.0.0.1:8899'), 'confirmed');
+const connection = new Connection(rpcUrl(), 'confirmed');
 const keeper = loadKeypair(env('KEEPER').replace(/^~/, process.env.HOME!));
 const mint = new PublicKey(env('MINT'));
 const INTERVAL = Number(env('INTERVAL_SECS', '20')) * 1000;

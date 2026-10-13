@@ -1,0 +1,23 @@
+[
+  {
+    "created_at": "2026-10-13T22:35:10.330714Z",
+    "display_name": "GPT Image 2.5",
+    "id": "eb26c0b4-d754-49b6-b7fb-83ea307e7c03",
+    "job_type": "gpt_image_2_5",
+    "min_result_url": "https://d8j0ntlcm91z4.cloudfront.net/user_3KRMBRryL5Fbmh1xCtgc8PqziHe/hf_20261013_223510_eb26c0b4-d754-49b6-b7fb-83ea307e7c03_min.webp",
+    "params": {
+      "aspect_ratio": "21:9",
+      "height": 1648,
+      "medias": [],
+      "model": "flare",
+      "prompt": "Ultra-wide cinematic header banner for a crypto game called FOMO City: aerial night view over a vast neon cyberpunk city of dark skyscrapers with warm gold and magenta lit windows, in the center-right a massive golden glowing obelisk tower made of stacked lit floors rises from a glowing cyan grid plaza, a neon cyan halo ring around its upper half and a beam of light shooting up from its tip. On the left side large bold glowing gold text \"FOMO CITY\" in a geometric rounded sans-serif and under it letter-spaced white text \"LAST BUYER WINS\". Volumetric haze, depth of field, premium polished game key art, deep navy-black night background (#05050F), warm gold (#FFC44D) glowing tower, neon cyan (#43E6FF) ring, a touch of neon pink (#FF6FA8). Spell the words exactly as written, no other text.",
+      "quality": "max",
+      "reference_elements": [],
+      "remove_bg": false,
+      "resolution": "4k",
+      "width": 3840
+    },
+    "result_url": "https://d8j0ntlcm91z4.cloudfront.net/user_3KRMBRryL5Fbmh1xCtgc8PqziHe/hf_20261013_223510_eb26c0b4-d754-49b6-b7fb-83ea307e7c03.png",
+    "status": "completed"
+  }
+]

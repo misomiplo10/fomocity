@@ -1,0 +1,23 @@
+[
+  {
+    "created_at": "2026-10-13T22:35:08.735407Z",
+    "display_name": "GPT Image 2.5",
+    "id": "6789e351-14ee-4007-b4f0-e578d805c93a",
+    "job_type": "gpt_image_2_5",
+    "min_result_url": "https://d8j0ntlcm91z4.cloudfront.net/user_3KRMBRryL5Fbmh1xCtgc8PqziHe/hf_20261013_223508_6789e351-14ee-4007-b4f0-e578d805c93a_min.webp",
+    "params": {
+      "aspect_ratio": "21:9",
+      "height": 1648,
+      "medias": [],
+      "model": "flare",
+      "prompt": "Ultra-wide cinematic header banner key art: aerial night view over a vast neon cyberpunk city of dark skyscrapers with warm gold and magenta lit windows, in the center a massive golden glowing obelisk tower made of stacked lit floors rises from a glowing cyan grid plaza, a neon cyan halo ring around its upper half and a beam of light shooting up from its tip, calm darker sky on the left and right for overlaying text later. Volumetric haze, depth of field, premium polished game key art, deep navy-black night background (#05050F), warm gold (#FFC44D) glowing tower, neon cyan (#43E6FF) ring, a touch of neon pink (#FF6FA8). No text, no letters, no logos, no signage.",
+      "quality": "max",
+      "reference_elements": [],
+      "remove_bg": false,
+      "resolution": "4k",
+      "width": 3840
+    },
+    "result_url": "https://d8j0ntlcm91z4.cloudfront.net/user_3KRMBRryL5Fbmh1xCtgc8PqziHe/hf_20261013_223508_6789e351-14ee-4007-b4f0-e578d805c93a.png",
+    "status": "completed"
+  }
+]

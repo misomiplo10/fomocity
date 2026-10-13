@@ -92,10 +92,18 @@ cd scripts && npm install
 | `./localnet.sh` | Local validator with Meteora DBC, DAMM v2, Metaplex and Token-2022 cloned from mainnet, plus our program. |
 | `npm run test:localnet` | End-to-end against the real Meteora programs: launch → sniper/normal trades → harvest → buyback (70/20/10 checked to the unit) → keeper/size/cooldown guards → floor buys → curve completes → migrate → surplus + LP fee harvest → DAMM v2 buyback. |
 | `npm run test:rounds` | Game rules on-chain, checked exactly: floor costs and splits, slippage and floor-count guards, dividends, a buyback after expiry going to the next round, settle, jackpot paid only to the last buyer and only once, a round with no buyers carrying over, the vault holding exactly what's owed, handing off and renouncing admin. |
+| `npm run tracker` | Watches the game's Meteora pools (bonding curve, then DAMM v2) and logs every FOMO buy and sell, from any app or aggregator, with the wallet and the exact SOL in or out of the pool, to `trades.jsonl`. Backfills history on start, then follows live. The game's own buybacks are flagged. Env: `MINT`, optional `TRACKER_LOG`. |
+| `npm run test:tracker` | Tracker against real Meteora swaps on localnet: two wallets buying and selling plus a game buyback, from history and live. |
 | `npm run launch` | Creates the DBC config and pool, hands pool creator to the treasury, initializes the game. Env: `RPC_URL`, `AUTHORITY`, `KEEPER_PUBKEY`, optional `FLOOR_PRICE_SOL`, `SECS_PER_FLOOR`, `MAX_TIMER_SECS`, `MIGRATION_SOL`, `MAX_BUYBACK_SOL`, `BUYBACK_GAP_SECS`, `DEV_WALLET`, `TOKEN_*`. |
 | `npm run keeper` | Loop: settle expired rounds, harvest, migrate if Meteora's keepers haven't, buy back (skips while the swap fee is above `MAX_FEE_BPS`). Env: `RPC_URL`, `KEEPER`, `MINT`, optional `JITO_URL` + `JITO_TIP_LAMPORTS` to send buybacks privately through Jito (not yet tested against a live block engine). |
 
 ### Mainnet launch
+
+**Helius setup.** Copy `scripts/.env.example` to `scripts/.env` (gitignored) and set
+`HELIUS_API_KEY`. Launch, keeper and tracker then use `https://mainnet.helius-rpc.com/?api-key=…`
+and its websocket; logs mask the key. For the website, create a **separate Helius key
+restricted to your domain** in the Helius dashboard and set it as `VITE_RPC_URL` in Vercel,
+because anything in the site's JavaScript is public.
 
 All settings, defaults and what's fixed by design are in [LAUNCH.md](LAUNCH.md).
 

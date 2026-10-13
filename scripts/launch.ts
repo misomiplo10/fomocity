@@ -1,6 +1,6 @@
 // One-shot launch: creates the DBC config + pool and binds the game to it.
 //
-//   RPC_URL=<mainnet RPC> AUTHORITY=~/.config/solana/id.json KEEPER_PUBKEY=<keeper> npm run launch
+//   AUTHORITY=~/.config/solana/id.json KEEPER_PUBKEY=<keeper> npm run launch   (RPC from scripts/.env)
 //
 // Anything other than a local validator is treated as mainnet: the script prints the full
 // launch plan and stops unless CONFIRM_MAINNET=yes is set. A launch can't be undone.
@@ -10,10 +10,10 @@ import { getOrCreateAssociatedTokenAccount } from '@solana/spl-token';
 import { Connection, LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js';
 import BN from 'bn.js';
 import { getPriceFromSqrtPrice } from '@meteora-ag/dynamic-bonding-curve-sdk';
-import { DEFAULT_LAUNCH, launch, launchCurve, loadKeypair } from './lib.ts';
+import { DEFAULT_LAUNCH, launch, launchCurve, loadKeypair, redactUrl, rpcUrl } from './lib.ts';
 
 const env = (k: string, d?: string) => process.env[k] ?? d ?? (() => { throw new Error(`set ${k}`); })();
-const RPC_URL = env('RPC_URL');
+const RPC_URL = rpcUrl();
 const connection = new Connection(RPC_URL, 'confirmed');
 const local = /^https?:\/\/(127\.0\.0\.1|localhost)(:|\/|$)/.test(RPC_URL);
 const authority = loadKeypair(env('AUTHORITY', '~/.config/solana/id.json').replace(/^~/, process.env.HOME!));
@@ -38,7 +38,7 @@ const devWallet = new PublicKey(env('DEV_WALLET', authority.publicKey.toBase58()
 const maxBuybackSol = Number(env('MAX_BUYBACK_SOL', '1'));
 const plan = {
   network: local ? 'localnet' : 'MAINNET',
-  rpc: RPC_URL,
+  rpc: redactUrl(RPC_URL),
   authority: authority.publicKey.toBase58(),
   authoritySol: (await connection.getBalance(authority.publicKey)) / LAMPORTS_PER_SOL,
   token: `${launchOpts.name} (${launchOpts.symbol}) ${launchOpts.uri}`,

@@ -34,6 +34,19 @@ const root = (p: string) => fileURLToPath(new URL(`../${p}`, import.meta.url));
 export const IDL = JSON.parse(readFileSync(root('idls/fomocity.json'), 'utf8')) as Idl;
 export const PROGRAM_ID = new PublicKey(IDL.address);
 
+// Secrets and endpoints live in scripts/.env (gitignored; see .env.example).
+try { process.loadEnvFile(root('scripts/.env')); } catch {}
+
+/** RPC to use: RPC_URL if set, else Helius mainnet from HELIUS_API_KEY. */
+export function rpcUrl(): string {
+  if (process.env.RPC_URL) return process.env.RPC_URL;
+  if (process.env.HELIUS_API_KEY) return `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`;
+  throw new Error('set HELIUS_API_KEY (or RPC_URL) in scripts/.env');
+}
+
+/** For logs: never print API keys. */
+export const redactUrl = (u: string) => u.replace(/(api[-_]?key=)[^&]+/i, '$1***');
+
 export function loadKeypair(path: string): Keypair {
   return Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(path, 'utf8'))));
 }

@@ -1,0 +1,23 @@
+[
+  {
+    "created_at": "2026-10-13T22:35:09.053838Z",
+    "display_name": "GPT Image 2.5",
+    "id": "c9f8cccf-1b6d-4ad5-8856-50ae366a325a",
+    "job_type": "gpt_image_2_5",
+    "min_result_url": "https://d8j0ntlcm91z4.cloudfront.net/user_3KRMBRryL5Fbmh1xCtgc8PqziHe/hf_20261013_223509_c9f8cccf-1b6d-4ad5-8856-50ae366a325a_min.webp",
+    "params": {
+      "aspect_ratio": "1:1",
+      "height": 2048,
+      "medias": [],
+      "model": "flare",
+      "prompt": "Premium app icon logo mark for a crypto game called FOMO City: a sleek tall golden skyscraper obelisk built from stacked glowing floors with lit window lines, tapering to a sharp spire, encircled by a thin glowing neon cyan halo ring at its upper half, a small minimalist neon pink countdown clock icon floating above the spire tip. Centered, symmetric, bold simple silhouette that reads at small sizes, subtle glow and soft reflections, polished modern game branding, deep navy-black night background (#05050F), warm gold (#FFC44D) glowing tower, neon cyan (#43E6FF) ring, a touch of neon pink (#FF6FA8). No text, no letters.",
+      "quality": "max",
+      "reference_elements": [],
+      "remove_bg": false,
+      "resolution": "2k",
+      "width": 2048
+    },
+    "result_url": "https://d8j0ntlcm91z4.cloudfront.net/user_3KRMBRryL5Fbmh1xCtgc8PqziHe/hf_20261013_223509_c9f8cccf-1b6d-4ad5-8856-50ae366a325a.png",
+    "status": "completed"
+  }
+]

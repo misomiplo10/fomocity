@@ -1,0 +1,27 @@
+[
+  {
+    "created_at": "2026-10-13T22:35:10.766392Z",
+    "display_name": "Recraft V4.1",
+    "id": "fb25c27b-b6b6-494a-a05f-f1d6f4d34bc0",
+    "job_type": "recraft_v4_1",
+    "min_result_url": "https://d8j0ntlcm91z4.cloudfront.net/user_3KRMBRryL5Fbmh1xCtgc8PqziHe/hf_20261013_223510_fb25c27b-b6b6-494a-a05f-f1d6f4d34bc0_min.webp",
+    "params": {
+      "aspect_ratio": "1:1",
+      "background_color": "#05050F",
+      "batch_size": 1,
+      "colors": [
+        "#FFC44D",
+        "#43E6FF",
+        "#FF6FA8",
+        "#FF9A2E"
+      ],
+      "height": 1024,
+      "model_type": "vector",
+      "prompt": "Flat vector logo mark: a tall golden obelisk skyscraper tower with simple floor lines, encircled by a thin cyan ring, a small pink clock icon above the tip, centered, symmetric, minimal geometric, bold silhouette, crisp edges, no text.",
+      "resolution": "2k",
+      "width": 1024
+    },
+    "result_url": "https://d8j0ntlcm91z4.cloudfront.net/user_3KRMBRryL5Fbmh1xCtgc8PqziHe/hf_20261013_223510_fb25c27b-b6b6-494a-a05f-f1d6f4d34bc0.svg",
+    "status": "completed"
+  }
+]
