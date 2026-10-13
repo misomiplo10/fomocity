@@ -7,7 +7,7 @@ import { randomBytes } from 'node:crypto';
 import { utils } from '@coral-xyz/anchor';
 import { DynamicBondingCurveClient, SwapMode } from '@meteora-ag/dynamic-bonding-curve-sdk';
 import { TOKEN_PROGRAM_ID, getAccount, getAssociatedTokenAddressSync } from '@solana/spl-token';
-import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram } from '@solana/web3.js';
+import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SYSVAR_CLOCK_PUBKEY, SystemProgram } from '@solana/web3.js';
 import BN from 'bn.js';
 import { buybackDbc, fomocity, harvestDbc, launch, readGame, recordBuy, send, settle, type GameState } from './lib.ts';
 import { track, type Trade } from './tracker.ts';
@@ -17,7 +17,7 @@ const dbc = new DynamicBondingCurveClient(connection, 'confirmed');
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const step = (s: string) => console.log(`▸ ${s}`);
 const big = (v: BN | bigint | number) => BigInt(v.toString());
-const P = { minBuy: 0.05 * LAMPORTS_PER_SOL, timeAdd: 5, maxTimer: 15, initial: 10, grace: 3 };
+const P = { minBuy: 0.05 * LAMPORTS_PER_SOL, timeAdd: 5, maxTimer: 25, initial: 20, grace: 3 };
 // A made-up 64-byte transaction signature, for guard checks that never reach the real swaps.
 const fakeSig = () => utils.bytes.bs58.encode(randomBytes(64));
 
@@ -36,13 +36,14 @@ async function expectError(p: Promise<unknown>, name: string) {
   assert.fail(`expected ${name}, but it succeeded`);
 }
 
-const chainNow = async () => (await connection.getBlockTime(await connection.getSlot('confirmed')))!;
+// The program's own clock (Clock sysvar). Block times can lag it by seconds on localnet.
+const chainNow = async () => Number((await connection.getAccountInfo(SYSVAR_CLOCK_PUBKEY, 'confirmed'))!.data.readBigInt64LE(32));
 async function waitUntil(ts: number) { while ((await chainNow()) < ts) await sleep(500); }
 
 async function main() {
   const [authority, keeper, alice, bob, carol] = await Promise.all([funded(30), funded(5), funded(10), funded(10), funded(5)]);
 
-  step('launch: 0.05 SOL minimum, +5s per buy, 15s cap, 10s start, 3s grace');
+  step('launch: 0.05 SOL minimum, +5s per buy, 25s cap, 20s start, 3s grace');
   const g0 = await launch(connection, authority, {
     launch: { migrationQuoteThresholdSol: 50, antiSniper: { startingFeeBps: 1_000, endingFeeBps: 100, numberOfPeriod: 2, totalDurationSecs: 2 } },
     params: {
@@ -65,6 +66,7 @@ async function main() {
     await send(connection, tx, [kp]);
   };
   await swap(alice, 0.3);
+  await sleep(2_500); // keep the two buys in different seconds for the ordering checks
   await swap(bob, 0.2);
   const trades: Trade[] = [];
   await track(connection, g0.mint, (t) => trades.push(t));
@@ -93,7 +95,8 @@ async function main() {
   assert.equal(r1.lastBuyer.toBase58(), tb.wallet);
   assert.equal(r1.buyCount, 2);
   assert.equal(big(r1.totalLamports), BigInt(ta.lamports) + BigInt(tb.lamports));
-  await expectError(recordBuy(keeperProgram, keeper, g, { ...tb, time: ta.time! - 1, sig: fakeSig() }), 'BuyOutOfOrder');
+  // A buy dated before the latest recorded one (but still inside the round) is out of order.
+  await expectError(recordBuy(keeperProgram, keeper, g, { ...tb, time: tb.time! - 1, sig: fakeSig() }), 'BuyOutOfOrder');
   g = await readGame(program, g0.mint);
   const recent = g.data.recent.filter((b: any) => !b.wallet.equals(PublicKey.default));
   assert.deepEqual(recent.map((b: any) => b.wallet.toBase58()), [ta.wallet, tb.wallet], 'recent buys list');

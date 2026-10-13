@@ -6,3 +6,6 @@ resolver = "2"
 overflow-checks = true
 lto = "fat"
 codegen-units = 1
+# Size-optimised: ~445 KB instead of ~566 KB, about 0.9 SOL less deploy rent.
+# ("z" is smaller still but overflows the SBF stack in initialize.)
+opt-level = "s"
