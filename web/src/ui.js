@@ -89,7 +89,9 @@ export function createUI({ backend, camera, plaza }) {
         ? `<li>The jackpot is <b>funded by the token's creator and the community</b>, not automatically by trading fees. Anyone can top it up: SOL sent to the game is used to buy FOMO back (<b>${G.BUYBACK_SPLIT.jackpot / 100}%</b> to this round's jackpot · <b>${G.BUYBACK_SPLIT.nextRound / 100}%</b> to the next round · <b>${G.BUYBACK_SPLIT.burn / 100}%</b> burned), and FOMO sent to the game goes straight into the jackpot.</li>`
         : `<li>The jackpot comes from <b>Meteora trading fees</b>: the game collects 80% of them in SOL (Meteora keeps 20%) and buys FOMO back: <b>${G.BUYBACK_SPLIT.jackpot / 100}%</b> to this round's jackpot · <b>${G.BUYBACK_SPLIT.nextRound / 100}%</b> to the next round · <b>${G.BUYBACK_SPLIT.burn / 100}%</b> burned.</li>
       <li>Launch fees start at <b>${MI.sniperFeeBps / 100}%</b>${MI.baseFeeBps ? ` and fall to <b>${MI.baseFeeBps / 100}%</b>` : ' and fall over the first minutes'}, so early snipers pay into the pot.</li>`}
-      <li>The token trades on a Meteora bonding curve, then in a regular pool whose liquidity is <b>locked forever</b>.</li>
+      ${external
+        ? `<li>The token trades on Meteora: first on a bonding curve, then in a regular Meteora pool.</li>`
+        : `<li>The token trades on a Meteora bonding curve, then in a regular pool whose liquidity is <b>locked forever</b>.</li>`}
       <li>Buys are spotted on-chain by the game's keeper and recorded in an open-source program together with their transaction signature, so anyone can check every recorded buy and every payout.</li>
       <li>A round with no buys carries its jackpot into the next one.</li>
     </ul>
