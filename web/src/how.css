@@ -23,7 +23,7 @@ li { margin: 6px 0; }
 b, strong { color: #fff; }
 .warn { border-color: var(--hot); background: rgba(255, 59, 59, 0.08); }
 .steps li::marker { color: var(--gold); font-weight: 700; }
-.split { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 14px 0; }
+.split { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: 14px 0; }
 .split div { text-align: center; border: 1px solid var(--line); border-radius: 10px; padding: 12px 6px; }
 .split big { display: block; font-size: 30px; font-weight: 800; color: var(--meteora); }
 .split span { color: var(--dim); font-size: 13px; }

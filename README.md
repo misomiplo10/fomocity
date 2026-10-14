@@ -12,7 +12,7 @@ web/                    Vite + three.js (WebGPU) client
   src/solana.js         chain backend, same interface, read-only: program + Meteora pool
   how.html, src/how.js  the "How it works" guide page (/how)
   src/city.js           endless procedural city (chunk streaming, TSL window shader)
-  src/towers.js         plaza: towers, jackpot obelisk, last-buyer beam, buyback column
+  src/towers.js         plaza: towers, jackpot obelisk, last-buyer beam
   src/ui.js             HUD, Meteora panel, rules dialog, live feed, name tags
 programs/fomocity/      Anchor 1.2 program: recorded buys, timer, auto-paid jackpot, Meteora fee flywheel
 idls/                   Meteora DBC + DAMM v2 IDLs (bindings via declare_program!) + our IDL
@@ -61,30 +61,26 @@ link can't point players at a lookalike game.
 - Guards: keeper-only reporting, minimum size, chain order, no duplicates, nothing before the
   round or after the deadline, and payouts only to the last buyer's own token account.
 
-## The Meteora flywheel
+## Where the jackpot comes from
 
 ```
-traders ──swap──▶ DBC bonding curve ──(curve fills)──▶ DAMM v2 pool (LP locked forever)
-                        │ 80% of fees, in SOL                 │ LP fees
-                        ▼                                     ▼
-                  treasury PDA  ◀───────── harvest_dbc / harvest_dbc_surplus / harvest_damm
-                        │ keeper: buyback_dbc / buyback_damm (SOL → token)
-                        ▼
-          70% current jackpot · 20% next-round seed · 10% burned
+traders ──swap (3% fee)──▶ Meteora DBC curve ──(curve fills)──▶ DAMM v2 pool
+                                │ fee share, in SOL                  │ LP fees (if the fee address owns positions)
+                                ▼                                    ▼
+                game fee address (program PDA)  ◀── harvest_dbc / harvest_dbc_surplus / harvest_damm (anyone)
+                                │
+                     80% jackpot (SOL) · 20% team (SOL)
 ```
 
-- The game's **treasury PDA** is both the DBC config's `fee_claimer` and the pool's `creator`,
-  so it receives 80% of every trading fee (Meteora keeps 20%). `initialize` refuses to bind a
-  pool where that isn't true.
-- Fees are collected in SOL (`CollectFeeMode::QuoteToken`). The launch fee starts at 50% and
-  decays to 1% over 2 minutes, so snipers pay into the pot.
-- On migration all liquidity is **permanently locked** in DAMM v2, and both position NFTs land
-  in the treasury. Their LP fees keep funding buybacks forever.
-- Harvests are permissionless. Buybacks are keeper-only because the keeper supplies `min_out`
-  from an off-chain quote. On-chain limits bound the damage a bad or compromised keeper can
-  do: a per-call SOL cap, a cooldown, a pinned pool and pinned accounts.
-- A buyback after the timer hits zero goes to the next round, so it can't top up a jackpot
-  whose winner is already decided.
+- The game's **fee address** is a program PDA with seeds `["treasury"]`, so it's known before the
+  token exists (`npm run fee-address`). The launcher sets it as the pool's fee claimer and/or hands
+  it the pool's creator rights; `initialize` refuses a pool whose fees don't reach it, or that
+  doesn't collect fees in SOL. See LAUNCH.md.
+- Claims are permissionless; every lamport claimed is split 80% to the jackpot, 20% to the team.
+  Fees claimed after the clock hits zero go to the next round, so they can't change a decided round.
+- The jackpot is held as wrapped SOL and paid out as plain SOL: `settle` moves it into a temporary
+  account and closes it to the winner in the same instruction. `withdraw_team` does the same for the
+  team's share. `fund_sol` lets anyone add SOL straight to the jackpot.
 
 ## Launch, keep, test
 
@@ -95,15 +91,16 @@ cd scripts && npm install
 | Command | What it does |
 | - | - |
 | `./localnet.sh` | Local validator with Meteora DBC, DAMM v2, Metaplex and Token-2022 cloned from mainnet, plus our program. |
-| `npm run test:localnet` | End-to-end against the real Meteora programs: launch → sniper/normal trades → harvest → buyback (70/20/10 checked to the unit) → keeper/size/cooldown guards → a Meteora buy tracked and recorded as last buyer → curve completes → migrate → surplus + LP fee harvest → DAMM v2 buyback. |
-| `npm run test:rounds` | Game rules on-chain with real Meteora buys: every `record_buy` guard, the countdown math, the jackpot paid automatically to the last buyer at settle (and refused to anyone else), the winners list, a buyback after expiry going to the next round, settle, jackpot paid only to the last buyer and only once, a round with no buyers carrying over, the vault holding exactly what's owed, handing off and renouncing admin. |
+| `npm run test:localnet` | End-to-end against the real Meteora programs: launch (flat 3%) → trades → fees claimed 80/20 → a buy recorded → curve completes → migrate → surplus + LP fees → winner paid in SOL → team paid in SOL. |
+| `npm run test:rounds` | Game rules on-chain with real Meteora buys: every `record_buy` guard, the countdown math, fees split 80/20, the jackpot paid in SOL to the last buyer at settle (and refused to anyone else), the winners list, carry-over, the vault holding exactly what's owed, the team payout, handing off and renouncing admin. |
 | `npm run tracker` | Watches the game's Meteora pools (bonding curve, then DAMM v2) and logs every FOMO buy and sell, from any app or aggregator, with the wallet and the exact SOL in or out of the pool, to `trades.jsonl`. Backfills history on start, then follows live. The game's own buybacks are flagged. Env: `MINT`, optional `TRACKER_LOG`. |
-| `npm run test:tracker` | Tracker against real Meteora swaps on localnet: two wallets buying and selling plus a game buyback, from history and live. |
-| `npm run attach` | Attach the game to a token someone else launched on Meteora DBC, by CA (see LAUNCH.md "Attach mode"). The jackpot is then funded with `npm run fund`. |
-| `npm run fund` | Top up the jackpot with SOL (bought back 70/20/10) or FOMO (straight in). Anyone can. |
-| `npm run test:external` | Attach mode on localnet: a token launched with someone else's fee wallet, normal setup refused, attach by CA, buys recorded, FOMO and SOL top-ups, winner paid. |
-| `npm run launch` | Creates the DBC config and pool, hands pool creator to the treasury, initializes the game. Env: `RPC_URL`, `AUTHORITY`, `KEEPER_PUBKEY`, optional `MIN_BUY_SOL`, `SECS_PER_BUY`, `MAX_TIMER_SECS`, `SETTLE_GRACE_SECS`, `MIGRATION_SOL`, `MAX_BUYBACK_SOL`, `BUYBACK_GAP_SECS`, `TOKEN_*`. |
-| `npm run keeper` | Runs the game: tracks Meteora buys and reports qualifying ones with `record_buy`, settles rounds (paying the winner), harvests, migrate if Meteora's keepers haven't, buy back (skips while the swap fee is above `MAX_FEE_BPS`). Env: `RPC_URL`, `KEEPER`, `MINT`, optional `JITO_URL` + `JITO_TIP_LAMPORTS` to send buybacks privately through Jito (not yet tested against a live block engine). |
+| `npm run test:tracker` | Tracker against real Meteora swaps on localnet: two wallets buying and selling, from history and live. |
+| `npm run attach` | Attach the game to a token someone else launched on Meteora DBC, by CA, once its fees are routed to the fee address (see LAUNCH.md). Env: `KEEPER_PUBKEY`, `TEAM_WALLET`, `MINT`. |
+| `npm run fund` | Add SOL straight to the jackpot (100%, no team share). Anyone can. |
+| `npm run fee-address` | Prints the game's fee address for the launcher. No RPC needed. |
+| `npm run test:external` | A token launched by someone else: fees routed by fee claimer (A) or creator transfer (B), launches the game must refuse, 80/20 split and SOL payout for both. |
+| `npm run launch` | Our own launch: DBC config (flat 3%, fee address as fee claimer) and pool, creator rights handed to the fee address, game initialized. Env: `AUTHORITY`, `KEEPER_PUBKEY`, `TEAM_WALLET`, optional `MIN_BUY_SOL`, `SECS_PER_BUY`, `MAX_TIMER_SECS`, `SETTLE_GRACE_SECS`, `MIGRATION_SOL`, `TOKEN_*`. |
+| `npm run keeper` | Runs the game: reports qualifying Meteora buys with `record_buy`, claims fees (80/20), settles rounds and pays the winner in SOL, pays the team, migrates if Meteora's bots don't, warns when its wallet is low. Env: `KEEPER`, `MINT`. |
 
 ### Mainnet launch
 
@@ -126,7 +123,7 @@ solana program deploy -u <rpc> target/deploy/fomocity.so --program-id target/dep
 cd scripts
 RPC_URL=<rpc> AUTHORITY=<wallet.json> KEEPER_PUBKEY=<keeper> npm run launch                     # prints the plan, sends nothing
 RPC_URL=<rpc> AUTHORITY=<wallet.json> KEEPER_PUBKEY=<keeper> CONFIRM_MAINNET=yes npm run launch  # launches
-RPC_URL=<rpc> KEEPER=<keeper.json> MINT=<mint> JITO_URL=https://mainnet.block-engine.jito.wtf npm run keeper
+KEEPER=<keeper.json> MINT=<mint> npm run keeper
 ```
 
 Build the site with `VITE_CLUSTER=mainnet VITE_RPC_URL=<rpc> VITE_MINT=<mint> npm run build`.
@@ -134,7 +131,7 @@ Keep `target/deploy/fomocity-keypair.json` (the program ID) safe and out of git.
 
 ### Admin
 
-`set_keeper` and `set_buyback_limits` are admin-only. `set_authority` hands admin to another key,
+`set_keeper` and `set_team` are admin-only. `set_authority` hands admin to another key,
 such as a multisig. `set_authority` with the default pubkey (`11111111111111111111111111111111`)
 renounces it for good, which freezes the keeper and limits.
 
@@ -154,9 +151,8 @@ The default tools in Solana CLI 3.0 ship Cargo 1.84, which can't build them.
 - [ ] The keeper is a trust point: it decides which buys get reported. Publish `recorded.jsonl` / the BuyRecorded events and keep the tracker open-source so anyone can re-check rounds.
 - [ ] Host the keeper with alerting (it's a long-running Node process).
 - [ ] Decide the migration threshold. Meteora's keepers auto-migrate SOL pools at exactly 10 SOL (the "equals vs at least" rule is unverified). Otherwise our keeper migrates; it's permissionless.
-- [ ] Turn on Jito sending for buybacks (`JITO_URL`) and verify it on mainnet with a tiny buyback.
 - [ ] **Revoke the upgrade authority** (or put it behind a multisig + timelock). The rules dialog says nobody can move the pot. That is only true once the program is immutable. The `authority` can still change the keeper and buyback limits until you `set_authority` to a multisig or renounce it.
-- [ ] Professional audit. Known risks: FOMO3D block-stuffing near timer end, buyback sandwiching within `min_out`.
-- [ ] Disclose the Meteora trust points: Meteora operators can pause the migrated DAMM v2 pool or change its fees. That stops buybacks (SOL waits in the vault), but they cannot touch the pot or the locked LP. See METEORA.md §10.
+- [ ] Professional audit. Known risks: FOMO3D block-stuffing near timer end, the keeper being the only reporter of buys.
+- [ ] Disclose the Meteora trust points: Meteora operators can pause the migrated DAMM v2 pool or change its fees. That stops trading and fee income (SOL waits in the vault), but they cannot touch the pot or the locked LP. See METEORA.md §10.
 - [ ] Legal review for your jurisdictions. This is a paid game of chance and may count as gambling or a security.
 - [ ] Only plain SPL mints are accepted (launch with `TokenType.SPLToken`). Token-2022 mints are rejected in `initialize`.

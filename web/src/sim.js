@@ -2,8 +2,8 @@
 // Bots trade the token on a simulated Meteora market. Every bot buy of at least the
 // minimum counts as a game move (exactly like a real Jupiter/Meteora buy reported by the
 // keeper): it adds time to the countdown and makes that bot the last buyer. Trading comes
-// in waves, so calm spells let rounds end, and snipers pile in near zero. 80% of every
-// trading fee goes to the treasury, and a keeper harvests and buys back into the jackpot.
+// in waves, so calm spells let rounds end, and snipers pile in near zero. Every trade pays a
+// flat 3% fee; the game's share is claimed and split 80% jackpot (SOL), 20% team.
 import * as G from './game.js';
 
 const BOT_NAMES = [
@@ -17,16 +17,11 @@ export const MARKET = {
   thresholdSol: 20,          // curve completes here, then migrates to DAMM v2
   startPrice: 0.0004,        // SOL per token at launch
   endPrice: 0.004,           // SOL per token when the curve completes
-  sniperFeeBps: 5_000,       // anti-sniper fee at launch...
-  baseFeeBps: 100,           // ...decaying exponentially to this
-  sniperWindowSecs: 60,
-  dammFeeBps: 100,           // migrated pool fee (FixedBps100)
-  treasuryShareBps: 8_000,   // protocol keeps 20%
+  feeBps: 300,               // flat 3% trading fee, before and after graduation
+  gameShareBps: 8_000,       // Meteora keeps 20% of each fee; the game is owed the rest
   harvestEverySecs: 8,
-  buybackGapSecs: 12,
-  maxBuybackSol: 0.25,
-  keeperMaxFeeBps: 200,      // keeper waits out the sniper window
   migrationSecs: 5,
+  seedSol: 0.5,              // sim only: round 1 starts with a seeded jackpot
 };
 
 export function createSim() {
@@ -36,34 +31,28 @@ export function createSim() {
   const history = [];
   const winners = []; // newest first: { round, wallet, amount, ts }
   let roundId = 1;
-  let round = G.newRound(roundId, now(), params);
+  let round = G.newRound(roundId, now(), params, Math.round(MARKET.seedSol * G.LAMPORTS));
 
   const launchTs = now();
   const market = {
     phase: 'curve',         // 'curve' → 'migrating' → 'damm'
     raisedSol: 0,
     price: MARKET.startPrice,
-    feeBps: MARKET.sniperFeeBps,
-    unclaimedSol: 0,        // treasury fees still sitting in the Meteora pool
-    wsolSol: 0,             // harvested, waiting for a buyback
-    harvestedSol: 0,
-    spentSol: 0,
-    boughtTokens: 0,
-    burnedTokens: 0,
+    feeBps: MARKET.feeBps,
+    unclaimedSol: 0,        // fees owed to the game, still in the Meteora pool
+    collectedSol: 0,        // fees claimed so far
+    toJackpotSol: 0,        // 80% of them
+    toTeamSol: 0,           // 20% of them
     volumeSol: 0,
     migratedAt: 0,
     lastHarvest: launchTs,
-    lastBuyback: 0,
   };
 
   function now() { return Date.now() / 1000; }
   const emit = (e) => { for (const l of listeners) l(e); };
 
-  function feeBpsAt(t) {
-    if (market.phase !== 'curve') return MARKET.dammFeeBps;
-    // Exponential decay from the sniper fee to the base fee over the window.
-    const k = Math.min(1, (t - launchTs) / MARKET.sniperWindowSecs);
-    return Math.round(MARKET.sniperFeeBps * Math.pow(MARKET.baseFeeBps / MARKET.sniperFeeBps, k));
+  function feeBpsAt() {
+    return MARKET.feeBps;
   }
 
   function curvePrice() {
@@ -75,12 +64,12 @@ export function createSim() {
 
   function trade(sol, t, who = null) {
     if (market.phase === 'migrating') return; // pool closed while liquidity moves
-    // A player's buy is a game move if it's big enough (the game's own buybacks pass no `who`).
+    // A buy is a game move if it's big enough (sellers pass no `who`).
     if (who && sol > 0 && G.recordBuy(round, params, who, Math.round(sol * G.LAMPORTS), t)) {
       emit({ type: 'buy', who, lamports: Math.round(sol * G.LAMPORTS), total: round.buyers[who] });
     }
     const fee = Math.abs(sol) * market.feeBps / 10_000;
-    market.unclaimedSol += fee * MARKET.treasuryShareBps / 10_000;
+    market.unclaimedSol += fee * MARKET.gameShareBps / 10_000;
     market.volumeSol += Math.abs(sol);
     if (market.phase === 'curve') {
       market.raisedSol = Math.max(0, market.raisedSol + sol - (sol > 0 ? fee : 0));
@@ -101,32 +90,22 @@ export function createSim() {
       market.phase = 'damm';
       emit({ type: 'migrated', price: market.price });
     }
+    // Claim the game's fees: 80% to the jackpot (in SOL), 20% to the team.
     if (t - market.lastHarvest >= MARKET.harvestEverySecs && market.unclaimedSol > 0.0005) {
-      const sol = market.unclaimedSol;
+      const lamports = Math.round(market.unclaimedSol * G.LAMPORTS);
       market.unclaimedSol = 0;
-      market.wsolSol += sol;
-      market.harvestedSol += sol;
       market.lastHarvest = t;
-      emit({ type: 'harvest', sol, venue: market.phase === 'damm' ? 'DAMM v2' : 'DBC' });
-    }
-    const cooled = t - market.lastBuyback >= MARKET.buybackGapSecs;
-    if (cooled && market.phase !== 'migrating' && market.wsolSol > 0.002 && market.feeBps <= MARKET.keeperMaxFeeBps) {
-      const sol = Math.min(market.wsolSol, MARKET.maxBuybackSol);
-      const tokens = Math.floor((sol * (1 - market.feeBps / 10_000) / market.price) * G.UNIT);
-      market.wsolSol -= sol;
-      trade(sol, t); // the buyback is a real swap: it pays fees and moves the price too
-      const r = G.fundFromBuyback(round, tokens, t);
-      market.spentSol += sol;
-      market.boughtTokens += r.out;
-      market.burnedTokens += r.burn;
-      market.lastBuyback = t;
-      emit({ type: 'buyback', sol, ...r });
+      const r = G.fundFromFees(round, lamports, t);
+      market.collectedSol += lamports / G.LAMPORTS;
+      market.toJackpotSol += r.toJackpot / G.LAMPORTS;
+      market.toTeamSol += r.toTeam / G.LAMPORTS;
+      emit({ type: 'fees', ...r });
     }
   }
 
   function tick() {
     const t = now();
-    market.feeBps = feeBpsAt(t);
+    market.feeBps = feeBpsAt();
 
     if (G.canSettle(round, params, t)) {
       const res = G.settle(round, params, t);

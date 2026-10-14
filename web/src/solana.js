@@ -34,7 +34,7 @@ export async function createChain(cfg) {
   const mint = new PublicKey(cfg.mint);
   const game = pda([Buffer.from('game'), mint.toBuffer()]);
   const roundKey = (id) => pda([Buffer.from('round'), game.toBuffer(), u64le(id)]);
-  const wsolVault = pda([Buffer.from('wsol'), game.toBuffer()]);
+  const feeAddress = pda([Buffer.from('treasury')]); // the game's fee address (treasury PDA)
 
   // Read-only: a throwaway key satisfies Anchor's provider; nothing is ever signed.
   const ro = Keypair.generate();
@@ -136,16 +136,23 @@ export async function createChain(cfg) {
 
   const market = {
     phase: 'curve', raisedSol: 0, thresholdSol: num(dbcConfig.migrationQuoteThreshold) / LAMPORTS_PER_SOL,
-    price: 0, feeBps: 0, unclaimedSol: 0, wsolSol: 0, harvestedSol: 0, spentSol: 0,
-    boughtTokens: 0, burnedTokens: 0, volumeSol: 0,
+    price: 0, feeBps: 0,
+    unclaimedSol: 0,   // fees owed to the game, still in the Meteora pool
+    collectedSol: 0,   // fees claimed so far
+    toJackpotSol: 0,   // 80% of them
+    toTeamSol: 0,      // 20% of them
+    volumeSol: 0,
   };
+  // The game's fee roles on the bonding curve: fee claimer (partner share) and/or creator.
+  const isFeeClaimer = dbcConfig.feeClaimer.equals(feeAddress);
 
   async function refreshMarket() {
     const pool = (await dbc.state.getPool(gameData.dbcPool)).poolState;
     const prevPhase = market.phase;
     market.phase = pool.isMigrated === 1 ? 'damm' : pool.migrationProgress >= 1 ? 'migrating' : 'curve';
     market.raisedSol = num(pool.quoteReserve) / LAMPORTS_PER_SOL;
-    market.unclaimedSol = gameData.external ? 0 : num(pool.partnerQuoteFee.add(pool.creatorQuoteFee)) / LAMPORTS_PER_SOL;
+    const owed = (isFeeClaimer ? num(pool.partnerQuoteFee) : 0) + (pool.creator.equals(feeAddress) ? num(pool.creatorQuoteFee) : 0);
+    market.unclaimedSol = market.phase === 'damm' ? 0 : owed / LAMPORTS_PER_SOL;
     const probe = new BN(LAMPORTS_PER_SOL / 10);
     if (market.phase === 'damm') {
       const ps = await cp.fetchPoolState(gameData.dammPool);
@@ -169,19 +176,17 @@ export async function createChain(cfg) {
         } catch {}
       }
     }
-    const wsol = await connection.getTokenAccountBalance(wsolVault).catch(() => null);
-    market.wsolSol = wsol ? Number(wsol.value.amount) / LAMPORTS_PER_SOL : 0;
     const s = gameData.stats;
-    if (relayed && market.boughtTokens && num(s.boughtTokens) > market.boughtTokens) {
-      const out = num(s.boughtTokens) - market.boughtTokens;
-      const burn = num(s.burnedTokens) - market.burnedTokens;
-      const toNext = Math.floor(out * 0.2);
-      emit({ type: 'buyback', sol: (num(s.spentLamports) / LAMPORTS_PER_SOL) - market.spentSol, out, toJackpot: out - toNext - burn, toNext, burn });
+    const collected = num(s.harvestedLamports);
+    // Through the relay there are no live events: spot new fee claims from the totals.
+    if (relayed && market.collectedSol && collected > market.collectedSol * LAMPORTS_PER_SOL + 0.5) {
+      const lamports = collected - Math.round(market.collectedSol * LAMPORTS_PER_SOL);
+      const toTeam = Math.floor(lamports * 0.2);
+      emit({ type: 'fees', lamports, toJackpot: lamports - toTeam, toTeam });
     }
-    market.harvestedSol = num(s.harvestedLamports) / LAMPORTS_PER_SOL;
-    market.spentSol = num(s.spentLamports) / LAMPORTS_PER_SOL;
-    market.boughtTokens = num(s.boughtTokens);
-    market.burnedTokens = num(s.burnedTokens);
+    market.collectedSol = collected / LAMPORTS_PER_SOL;
+    market.toJackpotSol = num(s.toJackpotLamports) / LAMPORTS_PER_SOL;
+    market.toTeamSol = num(s.toTeamLamports) / LAMPORTS_PER_SOL;
     if (prevPhase === 'curve' && market.phase !== 'curve') emit({ type: 'curveComplete', raisedSol: market.raisedSol });
     if (prevPhase !== 'damm' && market.phase === 'damm') emit({ type: 'migrated', price: market.price });
   }
@@ -199,14 +204,12 @@ export async function createChain(cfg) {
       if (name === 'BuyRecorded') {
         addBuy(num(d.round), d.wallet.toBase58(), num(d.lamports), num(d.buyTs));
         refreshRound().catch(() => {});
-      } else if (name === 'BoughtBack') {
-        emit({
-          type: 'buyback', sol: num(d.lamportsIn) / LAMPORTS_PER_SOL, out: num(d.tokensOut),
-          toJackpot: num(d.toJackpot), toNext: num(d.toNext), burn: num(d.burned),
-        });
+      } else if (name === 'Harvested') {
+        emit({ type: 'fees', lamports: num(d.lamports), toJackpot: num(d.toJackpot), toTeam: num(d.toTeam) });
+        refreshRound().catch(() => {});
         refreshMarket().catch(() => {});
       } else if (name === 'JackpotFunded') {
-        emit({ type: 'funded', funder: d.funder.toBase58(), tokens: num(d.tokens), lamports: num(d.lamports) });
+        emit({ type: 'funded', funder: d.funder.toBase58(), lamports: num(d.lamports) });
         refreshRound().catch(() => {});
       } else if (name === 'Settled') {
         refreshRound().catch(() => {});
@@ -226,8 +229,6 @@ export async function createChain(cfg) {
     mint: mint.toBase58(),
     params,
     marketInfo: {
-      // Attached to a token launched elsewhere: no fee income, jackpot funded by top-ups.
-      external: gameData.external,
       thresholdSol: market.thresholdSol,
       // Launch fee schedule as configured on the DBC pool.
       sniperFeeBps: Math.round(num(dbcConfig.poolFees.baseFee.cliffFeeNumerator) / 100_000),

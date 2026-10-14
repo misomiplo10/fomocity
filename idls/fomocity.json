@@ -7,494 +7,10 @@
   },
   "instructions": [
     {
-      "name": "buyback_damm",
-      "docs": [
-        "Keeper-only: same as `buyback_dbc`, against the migrated DAMM v2 pool."
-      ],
-      "discriminator": [
-        252,
-        142,
-        55,
-        94,
-        117,
-        31,
-        152,
-        53
-      ],
-      "accounts": [
-        {
-          "name": "keeper",
-          "signer": true
-        },
-        {
-          "name": "game",
-          "writable": true
-        },
-        {
-          "name": "round",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  114,
-                  111,
-                  117,
-                  110,
-                  100
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "game"
-              },
-              {
-                "kind": "account",
-                "path": "game.current_round",
-                "account": "Game"
-              }
-            ]
-          }
-        },
-        {
-          "name": "treasury",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  116,
-                  114,
-                  101,
-                  97,
-                  115,
-                  117,
-                  114,
-                  121
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "game"
-              }
-            ]
-          }
-        },
-        {
-          "name": "wsol_vault",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  119,
-                  115,
-                  111,
-                  108
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "game"
-              }
-            ]
-          }
-        },
-        {
-          "name": "stash",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  115,
-                  116,
-                  97,
-                  115,
-                  104
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "game"
-              }
-            ]
-          }
-        },
-        {
-          "name": "vault",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "mint"
-              }
-            ]
-          }
-        },
-        {
-          "name": "mint",
-          "writable": true,
-          "relations": [
-            "game"
-          ]
-        },
-        {
-          "name": "quote_mint",
-          "address": "So11111111111111111111111111111111111111112"
-        },
-        {
-          "name": "damm_pool",
-          "writable": true,
-          "relations": [
-            "game"
-          ]
-        },
-        {
-          "name": "token_a_vault",
-          "writable": true
-        },
-        {
-          "name": "token_b_vault",
-          "writable": true
-        },
-        {
-          "name": "pool_authority"
-        },
-        {
-          "name": "event_authority"
-        },
-        {
-          "name": "damm_program",
-          "address": "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG"
-        },
-        {
-          "name": "token_program"
-        }
-      ],
-      "args": [
-        {
-          "name": "amount_in",
-          "type": "u64"
-        },
-        {
-          "name": "min_out",
-          "type": "u64"
-        }
-      ]
-    },
-    {
-      "name": "buyback_dbc",
-      "docs": [
-        "Keeper-only: swap up to `buyback.max_lamports` of harvested SOL for the game token",
-        "on the bonding curve. `min_out` comes from an off-chain quote; together with the",
-        "size cap and the cooldown it bounds what a sandwich attack can extract."
-      ],
-      "discriminator": [
-        188,
-        145,
-        125,
-        216,
-        252,
-        213,
-        233,
-        39
-      ],
-      "accounts": [
-        {
-          "name": "keeper",
-          "signer": true
-        },
-        {
-          "name": "game",
-          "writable": true
-        },
-        {
-          "name": "round",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  114,
-                  111,
-                  117,
-                  110,
-                  100
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "game"
-              },
-              {
-                "kind": "account",
-                "path": "game.current_round",
-                "account": "Game"
-              }
-            ]
-          }
-        },
-        {
-          "name": "treasury",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  116,
-                  114,
-                  101,
-                  97,
-                  115,
-                  117,
-                  114,
-                  121
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "game"
-              }
-            ]
-          }
-        },
-        {
-          "name": "wsol_vault",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  119,
-                  115,
-                  111,
-                  108
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "game"
-              }
-            ]
-          }
-        },
-        {
-          "name": "stash",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  115,
-                  116,
-                  97,
-                  115,
-                  104
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "game"
-              }
-            ]
-          }
-        },
-        {
-          "name": "vault",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "mint"
-              }
-            ]
-          }
-        },
-        {
-          "name": "mint",
-          "writable": true,
-          "relations": [
-            "game"
-          ]
-        },
-        {
-          "name": "quote_mint",
-          "address": "So11111111111111111111111111111111111111112"
-        },
-        {
-          "name": "dbc_pool",
-          "writable": true,
-          "relations": [
-            "game"
-          ]
-        },
-        {
-          "name": "dbc_config",
-          "relations": [
-            "game"
-          ]
-        },
-        {
-          "name": "base_vault",
-          "writable": true
-        },
-        {
-          "name": "quote_vault",
-          "writable": true
-        },
-        {
-          "name": "pool_authority"
-        },
-        {
-          "name": "event_authority"
-        },
-        {
-          "name": "dbc_program",
-          "address": "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN"
-        },
-        {
-          "name": "token_program"
-        }
-      ],
-      "args": [
-        {
-          "name": "amount_in",
-          "type": "u64"
-        },
-        {
-          "name": "min_out",
-          "type": "u64"
-        }
-      ]
-    },
-    {
-      "name": "fund_jackpot",
-      "docs": [
-        "Anyone: add FOMO straight to the jackpot. Goes to the current round while its",
-        "countdown is running, otherwise to the next round's seed."
-      ],
-      "discriminator": [
-        9,
-        151,
-        50,
-        205,
-        163,
-        112,
-        112,
-        6
-      ],
-      "accounts": [
-        {
-          "name": "funder",
-          "signer": true
-        },
-        {
-          "name": "game"
-        },
-        {
-          "name": "mint",
-          "relations": [
-            "game"
-          ]
-        },
-        {
-          "name": "round",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  114,
-                  111,
-                  117,
-                  110,
-                  100
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "game"
-              },
-              {
-                "kind": "account",
-                "path": "game.current_round",
-                "account": "Game"
-              }
-            ]
-          }
-        },
-        {
-          "name": "funder_token_account",
-          "writable": true
-        },
-        {
-          "name": "vault",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "mint"
-              }
-            ]
-          }
-        },
-        {
-          "name": "token_program"
-        }
-      ],
-      "args": [
-        {
-          "name": "amount",
-          "type": "u64"
-        }
-      ]
-    },
-    {
       "name": "fund_sol",
       "docs": [
-        "Anyone: send SOL to the game's buyback wallet. The keeper swaps it for FOMO on the",
-        "token's pool and splits it like any buyback: 70% jackpot · 20% next round · 10% burned."
+        "Anyone: add SOL straight to the jackpot (all of it; no team share). Goes to the",
+        "current round while its countdown runs, otherwise to the next round."
       ],
       "discriminator": [
         156,
@@ -513,7 +29,35 @@
           "signer": true
         },
         {
-          "name": "game"
+          "name": "game",
+          "writable": true
+        },
+        {
+          "name": "round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game"
+              },
+              {
+                "kind": "account",
+                "path": "game.current_round",
+                "account": "Game"
+              }
+            ]
+          }
         },
         {
           "name": "wsol_vault",
@@ -554,8 +98,8 @@
     {
       "name": "harvest_damm",
       "docs": [
-        "Permissionless, after migration: claim fees from one of the treasury's locked",
-        "DAMM v2 LP positions. DAMM checks that the treasury owns the position NFT."
+        "Permissionless, after migration: claim fees from an LP position the treasury owns in",
+        "the DAMM v2 pool (DAMM checks the treasury holds the position NFT), then split them."
       ],
       "discriminator": [
         186,
@@ -573,6 +117,33 @@
           "writable": true
         },
         {
+          "name": "round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game"
+              },
+              {
+                "kind": "account",
+                "path": "game.current_round",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
           "name": "treasury",
           "pda": {
             "seeds": [
@@ -588,10 +159,6 @@
                   114,
                   121
                 ]
-              },
-              {
-                "kind": "account",
-                "path": "game"
               }
             ]
           }
@@ -689,8 +256,8 @@
     {
       "name": "harvest_dbc",
       "docs": [
-        "Permissionless: claim the treasury's partner + creator trading fees from the DBC",
-        "pool. Fees are collected in SOL (QuoteToken mode) into the treasury's WSOL account."
+        "Permissionless: claim the trading fees the treasury is owed on the DBC pool, as fee",
+        "claimer (partner share) and/or pool creator (creator share), in SOL, then split them."
       ],
       "discriminator": [
         235,
@@ -708,6 +275,33 @@
           "writable": true
         },
         {
+          "name": "round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game"
+              },
+              {
+                "kind": "account",
+                "path": "game.current_round",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
           "name": "treasury",
           "pda": {
             "seeds": [
@@ -723,10 +317,6 @@
                   114,
                   121
                 ]
-              },
-              {
-                "kind": "account",
-                "path": "game"
               }
             ]
           }
@@ -824,8 +414,8 @@
     {
       "name": "harvest_dbc_surplus",
       "docs": [
-        "Permissionless, once the curve has completed: claim the partner and creator share",
-        "of the surplus SOL left over from the final buy. Each side can only claim once."
+        "Permissionless, once the curve has completed: claim the treasury's share of the",
+        "surplus SOL left over from the final buy (each side can only claim once), then split it."
       ],
       "discriminator": [
         20,
@@ -843,6 +433,33 @@
           "writable": true
         },
         {
+          "name": "round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game"
+              },
+              {
+                "kind": "account",
+                "path": "game.current_round",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
           "name": "treasury",
           "pda": {
             "seeds": [
@@ -858,10 +475,6 @@
                   114,
                   121
                 ]
-              },
-              {
-                "kind": "account",
-                "path": "game"
               }
             ]
           }
@@ -927,10 +540,9 @@
     {
       "name": "initialize",
       "docs": [
-        "Binds the game to a token that was launched on DBC with the treasury PDA as both",
-        "fee claimer and pool creator. Launch order (see scripts/launch.ts):",
-        "pre-generate the mint keypair → derive game + treasury → create DBC config with",
-        "fee_claimer = treasury → create pool → transfer_pool_creator(treasury) → initialize."
+        "Binds the game to a token launched on Meteora DBC, paired with SOL, collecting fees",
+        "in SOL, and whose fees reach the game: the treasury must be the pool's fee claimer,",
+        "its creator, or both. Round 1 opens now; only buys from here on count."
       ],
       "discriminator": [
         175,
@@ -978,6 +590,9 @@
         },
         {
           "name": "treasury",
+          "docs": [
+            "and owns the SOL vault and stash."
+          ],
           "pda": {
             "seeds": [
               {
@@ -992,32 +607,6 @@
                   114,
                   121
                 ]
-              },
-              {
-                "kind": "account",
-                "path": "game"
-              }
-            ]
-          }
-        },
-        {
-          "name": "vault",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "mint"
               }
             ]
           }
@@ -1025,7 +614,7 @@
         {
           "name": "wsol_vault",
           "docs": [
-            "Harvested SOL fees waiting to be spent on buybacks."
+            "Jackpots and the team's share, as wrapped SOL."
           ],
           "writable": true,
           "pda": {
@@ -1049,7 +638,8 @@
         {
           "name": "stash",
           "docs": [
-            "Buyback output lands here before it is split."
+            "Catches any fees paid in the game token (only possible in DAMM v2 pools that collect",
+            "both sides); they stay here."
           ],
           "writable": true,
           "pda": {
@@ -1130,224 +720,10 @@
           }
         },
         {
-          "name": "buyback",
+          "name": "cfg",
           "type": {
             "defined": {
-              "name": "BuybackConfig"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "name": "initialize_external",
-      "docs": [
-        "Attach the game to a token someone else already launched on Meteora DBC. The pool's",
-        "fees don't go to the game, so the `harvest_*` instructions won't work; the jackpot is",
-        "funded with `fund_sol` (bought back by the keeper, 70/20/10) and `fund_jackpot`."
-      ],
-      "discriminator": [
-        207,
-        191,
-        68,
-        92,
-        121,
-        151,
-        127,
-        220
-      ],
-      "accounts": [
-        {
-          "name": "authority",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "mint"
-        },
-        {
-          "name": "quote_mint",
-          "address": "So11111111111111111111111111111111111111112"
-        },
-        {
-          "name": "game",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  103,
-                  97,
-                  109,
-                  101
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "mint"
-              }
-            ]
-          }
-        },
-        {
-          "name": "treasury",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  116,
-                  114,
-                  101,
-                  97,
-                  115,
-                  117,
-                  114,
-                  121
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "game"
-              }
-            ]
-          }
-        },
-        {
-          "name": "vault",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "mint"
-              }
-            ]
-          }
-        },
-        {
-          "name": "wsol_vault",
-          "docs": [
-            "Harvested SOL fees waiting to be spent on buybacks."
-          ],
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  119,
-                  115,
-                  111,
-                  108
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "game"
-              }
-            ]
-          }
-        },
-        {
-          "name": "stash",
-          "docs": [
-            "Buyback output lands here before it is split."
-          ],
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  115,
-                  116,
-                  97,
-                  115,
-                  104
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "game"
-              }
-            ]
-          }
-        },
-        {
-          "name": "round",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  114,
-                  111,
-                  117,
-                  110,
-                  100
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "game"
-              },
-              {
-                "kind": "const",
-                "value": [
-                  1,
-                  0,
-                  0,
-                  0,
-                  0,
-                  0,
-                  0,
-                  0
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "dbc_pool"
-        },
-        {
-          "name": "dbc_config"
-        },
-        {
-          "name": "token_program"
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
-        }
-      ],
-      "args": [
-        {
-          "name": "params",
-          "type": {
-            "defined": {
-              "name": "Params"
-            }
-          }
-        },
-        {
-          "name": "buyback",
-          "type": {
-            "defined": {
-              "name": "BuybackConfig"
+              "name": "GameConfig"
             }
           }
         }
@@ -1356,7 +732,7 @@
     {
       "name": "record_buy",
       "docs": [
-        "Keeper-only: report a qualifying FOMO buy seen on the game's Meteora pools. Buys must",
+        "Keeper-only: report a qualifying buy seen on the token's Meteora pools. Buys must",
         "be reported in chain order, inside the round, and at least `min_buy_lamports`. Each one",
         "adds `time_add_per_buy` to the countdown, capped at `max_timer` after the buy.",
         "`sig` is the swap's transaction signature, kept in the event so anyone can audit it."
@@ -1436,7 +812,7 @@
       "name": "set_authority",
       "docs": [
         "Hand admin rights to another key (e.g. a multisig). Passing `Pubkey::default()`",
-        "renounces them for good: nobody can sign as it, so keeper and buyback limits freeze."
+        "renounces them for good: nobody can sign as it, so keeper and team wallet freeze."
       ],
       "discriminator": [
         133,
@@ -1469,46 +845,10 @@
       ]
     },
     {
-      "name": "set_buyback_limits",
-      "discriminator": [
-        198,
-        63,
-        165,
-        44,
-        161,
-        39,
-        164,
-        71
-      ],
-      "accounts": [
-        {
-          "name": "authority",
-          "signer": true,
-          "relations": [
-            "game"
-          ]
-        },
-        {
-          "name": "game",
-          "writable": true
-        }
-      ],
-      "args": [
-        {
-          "name": "max_lamports",
-          "type": "u64"
-        },
-        {
-          "name": "min_gap_secs",
-          "type": "i64"
-        }
-      ]
-    },
-    {
       "name": "set_damm_config",
       "docs": [
         "Fix the DAMM v2 config if the migration used a different one than expected.",
-        "Only allowed before the DBC pool has migrated, so it can't redirect live buybacks."
+        "Only allowed before the DBC pool has migrated."
       ],
       "discriminator": [
         195,
@@ -1579,12 +919,47 @@
       ]
     },
     {
+      "name": "set_team",
+      "docs": [
+        "Change where the team's 20% goes. Whatever is already owed goes to the new wallet."
+      ],
+      "discriminator": [
+        112,
+        239,
+        29,
+        206,
+        52,
+        77,
+        31,
+        99
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "game"
+          ]
+        },
+        {
+          "name": "game",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "team",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
       "name": "settle",
       "docs": [
         "Permissionless, once the countdown has run out plus `settle_grace_secs` (time for the",
-        "keeper to report buys that landed just before zero). Pays the whole jackpot to the",
-        "last buyer in this same instruction, records the winner, and opens the next round.",
-        "A round with no buys carries its jackpot over."
+        "keeper to report buys that landed just before zero). Pays the whole jackpot, in SOL,",
+        "to the last buyer in this same instruction, records the winner, and opens the next",
+        "round. A round with no buys carries its jackpot over."
       ],
       "discriminator": [
         175,
@@ -1605,12 +980,6 @@
         {
           "name": "game",
           "writable": true
-        },
-        {
-          "name": "mint",
-          "relations": [
-            "game"
-          ]
         },
         {
           "name": "round",
@@ -1644,35 +1013,190 @@
           "writable": true
         },
         {
-          "name": "vault",
+          "name": "treasury",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  114,
+                  101,
+                  97,
+                  115,
+                  117,
+                  114,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "wsol_vault",
           "writable": true,
           "pda": {
             "seeds": [
               {
                 "kind": "const",
                 "value": [
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
+                  119,
+                  115,
+                  111,
+                  108
                 ]
               },
               {
                 "kind": "account",
-                "path": "mint"
+                "path": "game"
               }
             ]
           }
         },
         {
-          "name": "winner_token_account",
+          "name": "quote_mint",
+          "address": "So11111111111111111111111111111111111111112"
+        },
+        {
+          "name": "payout",
           "docs": [
-            "The last buyer's token account; required exactly when the round has a winner.",
-            "Funds can only ever go to an account owned by the last buyer."
+            "Temporary account the jackpot passes through to become plain SOL (closed in this ix)."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  121,
+                  111,
+                  117,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "winner",
+          "docs": [
+            "ever receives SOL."
           ],
           "writable": true,
           "optional": true
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "withdraw_team",
+      "docs": [
+        "Anyone: send the team's accumulated share to the team wallet as plain SOL."
+      ],
+      "discriminator": [
+        132,
+        156,
+        138,
+        250,
+        32,
+        15,
+        101,
+        35
+      ],
+      "accounts": [
+        {
+          "name": "cranker",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "game",
+          "writable": true
+        },
+        {
+          "name": "treasury",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  114,
+                  101,
+                  97,
+                  115,
+                  117,
+                  114,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "wsol_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  119,
+                  115,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "quote_mint",
+          "address": "So11111111111111111111111111111111111111112"
+        },
+        {
+          "name": "payout",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  121,
+                  111,
+                  117,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "team",
+          "writable": true
         },
         {
           "name": "token_program"
@@ -1728,19 +1252,6 @@
       ]
     },
     {
-      "name": "BoughtBack",
-      "discriminator": [
-        188,
-        156,
-        61,
-        154,
-        116,
-        184,
-        186,
-        21
-      ]
-    },
-    {
       "name": "BuyRecorded",
       "discriminator": [
         120,
@@ -1791,6 +1302,19 @@
         145,
         238
       ]
+    },
+    {
+      "name": "TeamPaid",
+      "discriminator": [
+        83,
+        91,
+        218,
+        127,
+        232,
+        81,
+        17,
+        167
+      ]
     }
   ],
   "errors": [
@@ -1801,93 +1325,88 @@
     },
     {
       "code": 6001,
-      "name": "BuyTooSmall",
-      "msg": "Buy is below the minimum that counts"
-    },
-    {
-      "code": 6002,
-      "name": "BuyBeforeRound",
-      "msg": "Buy happened before this round started"
-    },
-    {
-      "code": 6003,
-      "name": "BuyAfterDeadline",
-      "msg": "Buy happened after the countdown ran out"
-    },
-    {
-      "code": 6004,
-      "name": "BuyOutOfOrder",
-      "msg": "Buys must be reported once each, in chain order"
-    },
-    {
-      "code": 6005,
-      "name": "WinnerAccountMismatch",
-      "msg": "Winner token account must be passed exactly when the round has a winner"
-    },
-    {
-      "code": 6006,
-      "name": "SlippageExceeded",
-      "msg": "Cost exceeds max_cost"
-    },
-    {
-      "code": 6007,
       "name": "Overflow",
       "msg": "Arithmetic overflow"
     },
     {
-      "code": 6008,
+      "code": 6002,
       "name": "AlreadySettled",
       "msg": "Round already settled"
     },
     {
-      "code": 6009,
+      "code": 6003,
       "name": "TimerRunning",
       "msg": "Timer still running"
     },
     {
-      "code": 6010,
+      "code": 6004,
       "name": "BadParams",
       "msg": "Invalid params"
     },
     {
-      "code": 6011,
+      "code": 6005,
       "name": "UnsupportedMint",
       "msg": "Mint has Token-2022 extensions"
     },
     {
-      "code": 6012,
+      "code": 6006,
       "name": "WrongPool",
       "msg": "Pool or config does not belong to this game's token"
     },
     {
+      "code": 6007,
+      "name": "FeesNotInSol",
+      "msg": "The pool must collect its fees in SOL (quote token)"
+    },
+    {
+      "code": 6008,
+      "name": "NoFeesToGame",
+      "msg": "The game's fee address is neither the pool's fee claimer nor its creator"
+    },
+    {
+      "code": 6009,
+      "name": "NotKeeper",
+      "msg": "Only the keeper can report buys"
+    },
+    {
+      "code": 6010,
+      "name": "AlreadyMigrated",
+      "msg": "DBC pool already migrated"
+    },
+    {
+      "code": 6011,
+      "name": "BuyTooSmall",
+      "msg": "Buy is below the minimum that counts"
+    },
+    {
+      "code": 6012,
+      "name": "BuyBeforeRound",
+      "msg": "Buy happened before this round started"
+    },
+    {
       "code": 6013,
-      "name": "TreasuryNotCreator",
-      "msg": "Treasury PDA must be the DBC pool creator"
+      "name": "BuyAfterDeadline",
+      "msg": "Buy happened after the countdown ran out"
     },
     {
       "code": 6014,
-      "name": "TreasuryNotFeeClaimer",
-      "msg": "Treasury PDA must be the DBC config fee claimer"
+      "name": "BuyOutOfOrder",
+      "msg": "Buys must be reported once each, in chain order"
     },
     {
       "code": 6015,
-      "name": "NotKeeper",
-      "msg": "Only the keeper can buy back"
+      "name": "WinnerAccountMismatch",
+      "msg": "Winner account must be passed exactly when the round has a winner"
     },
     {
       "code": 6016,
-      "name": "BadBuybackSize",
-      "msg": "Buyback amount out of range"
+      "name": "NothingToClaim",
+      "msg": "Nothing to claim"
     },
     {
       "code": 6017,
-      "name": "BuybackCooldown",
-      "msg": "Buyback cooldown still running"
-    },
-    {
-      "code": 6018,
-      "name": "AlreadyMigrated",
-      "msg": "DBC pool already migrated"
+      "name": "WrongTeam",
+      "msg": "That is not the game's team wallet"
     }
   ],
   "types": [
@@ -1945,46 +1464,6 @@
       }
     },
     {
-      "name": "BoughtBack",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "round",
-            "type": "u64"
-          },
-          {
-            "name": "venue",
-            "type": {
-              "defined": {
-                "name": "Venue"
-              }
-            }
-          },
-          {
-            "name": "lamports_in",
-            "type": "u64"
-          },
-          {
-            "name": "tokens_out",
-            "type": "u64"
-          },
-          {
-            "name": "to_jackpot",
-            "type": "u64"
-          },
-          {
-            "name": "to_next",
-            "type": "u64"
-          },
-          {
-            "name": "burned",
-            "type": "u64"
-          }
-        ]
-      }
-    },
-    {
       "name": "BuyRecorded",
       "type": {
         "kind": "struct",
@@ -2017,42 +1496,6 @@
                 64
               ]
             }
-          }
-        ]
-      }
-    },
-    {
-      "name": "BuybackConfig",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "keeper",
-            "docs": [
-              "The only key allowed to call `buyback_*` (it supplies the `min_out` quote)."
-            ],
-            "type": "pubkey"
-          },
-          {
-            "name": "max_lamports",
-            "docs": [
-              "Max SOL (lamports) per buyback call."
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "min_gap_secs",
-            "docs": [
-              "Minimum seconds between buybacks."
-            ],
-            "type": "i64"
-          },
-          {
-            "name": "damm_config",
-            "docs": [
-              "DAMM v2 config the DBC pool migrates into; determines the DAMM pool address."
-            ],
-            "type": "pubkey"
           }
         ]
       }
@@ -2120,34 +1563,6 @@
       }
     },
     {
-      "name": "FlywheelStats",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "harvested_lamports",
-            "type": "u64"
-          },
-          {
-            "name": "spent_lamports",
-            "type": "u64"
-          },
-          {
-            "name": "bought_tokens",
-            "type": "u64"
-          },
-          {
-            "name": "burned_tokens",
-            "type": "u64"
-          },
-          {
-            "name": "last_buyback_ts",
-            "type": "i64"
-          }
-        ]
-      }
-    },
-    {
       "name": "Game",
       "type": {
         "kind": "struct",
@@ -2169,6 +1584,14 @@
             }
           },
           {
+            "name": "cfg",
+            "type": {
+              "defined": {
+                "name": "GameConfig"
+              }
+            }
+          },
+          {
             "name": "current_round",
             "type": "u64"
           },
@@ -2185,28 +1608,19 @@
             "type": "pubkey"
           },
           {
-            "name": "buyback",
-            "type": {
-              "defined": {
-                "name": "BuybackConfig"
-              }
-            }
+            "name": "team_owed",
+            "docs": [
+              "Team share claimed but not yet sent (lamports)."
+            ],
+            "type": "u64"
           },
           {
             "name": "stats",
             "type": {
               "defined": {
-                "name": "FlywheelStats"
+                "name": "Stats"
               }
             }
-          },
-          {
-            "name": "external",
-            "docs": [
-              "True when attached to a token launched elsewhere (no fee income; funded by",
-              "fund_sol / fund_jackpot instead of harvests)."
-            ],
-            "type": "bool"
           },
           {
             "name": "recent",
@@ -2250,12 +1664,37 @@
             "type": "u8"
           },
           {
-            "name": "vault_bump",
-            "type": "u8"
-          },
-          {
             "name": "treasury_bump",
             "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "GameConfig",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "keeper",
+            "docs": [
+              "The only key allowed to call `record_buy`."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "team",
+            "docs": [
+              "Receives the team's 20% of fees (as plain SOL, via `withdraw_team`)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "damm_config",
+            "docs": [
+              "DAMM v2 config the DBC pool migrates into; determines the DAMM pool address."
+            ],
+            "type": "pubkey"
           }
         ]
       }
@@ -2265,6 +1704,10 @@
       "type": {
         "kind": "struct",
         "fields": [
+          {
+            "name": "round",
+            "type": "u64"
+          },
           {
             "name": "venue",
             "type": {
@@ -2276,6 +1719,18 @@
           {
             "name": "lamports",
             "type": "u64"
+          },
+          {
+            "name": "to_jackpot",
+            "type": "u64"
+          },
+          {
+            "name": "to_team",
+            "type": "u64"
+          },
+          {
+            "name": "to_current_round",
+            "type": "bool"
           }
         ]
       }
@@ -2292,10 +1747,6 @@
           {
             "name": "funder",
             "type": "pubkey"
-          },
-          {
-            "name": "tokens",
-            "type": "u64"
           },
           {
             "name": "lamports",
@@ -2961,10 +2412,16 @@
           },
           {
             "name": "jackpot",
+            "docs": [
+              "Jackpot in lamports."
+            ],
             "type": "u64"
           },
           {
             "name": "next_round_pot",
+            "docs": [
+              "Lamports already set aside for the next round."
+            ],
             "type": "u64"
           },
           {
@@ -3018,6 +2475,54 @@
           },
           {
             "name": "carry",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Stats",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "harvested_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "to_jackpot_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "to_team_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "team_paid_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "jackpots_paid_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "funded_lamports",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TeamPaid",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "team",
+            "type": "pubkey"
+          },
+          {
+            "name": "lamports",
             "type": "u64"
           }
         ]
@@ -3110,7 +2615,7 @@
           {
             "name": "amount",
             "docs": [
-              "Jackpot paid, in token base units."
+              "Jackpot paid, in lamports."
             ],
             "type": "u64"
           },

@@ -8,7 +8,7 @@
 // Prints the addresses to put in the web client and the keeper's MINT env var.
 import { Connection, LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js';
 import BN from 'bn.js';
-import { DEFAULT_LAUNCH, launch, loadKeypair, redactUrl, rpcUrl } from './lib.ts';
+import { DEFAULT_LAUNCH, feeAddress, launch, loadKeypair, redactUrl, rpcUrl } from './lib.ts';
 
 const env = (k: string, d?: string) => process.env[k] ?? d ?? (() => { throw new Error(`set ${k}`); })();
 const RPC_URL = rpcUrl();
@@ -32,20 +32,19 @@ const maxTimer = Number(env('MAX_TIMER_SECS', '1800'));
 const graceSecs = Number(env('SETTLE_GRACE_SECS', '60'));
 
 const keeperKey = new PublicKey(env('KEEPER_PUBKEY'));
-const maxBuybackSol = Number(env('MAX_BUYBACK_SOL', '1'));
+const teamKey = new PublicKey(env('TEAM_WALLET'));
 const plan = {
   network: local ? 'localnet' : 'MAINNET',
   rpc: redactUrl(RPC_URL),
   authority: authority.publicKey.toBase58(),
   authoritySol: (await connection.getBalance(authority.publicKey)) / LAMPORTS_PER_SOL,
   token: `${launchOpts.name} (${launchOpts.symbol}) ${launchOpts.uri}`,
+  tradingFee: '3% flat',
   migrationSol: launchOpts.migrationQuoteThresholdSol,
-  minBuySol,
-  secsPerBuy,
-  maxTimerSecs: maxTimer,
-  settleGraceSecs: graceSecs,
+  fees: `game fee address ${feeAddress().toBase58()} → 80% jackpot (SOL) · 20% team`,
+  minBuySol, secsPerBuy, maxTimerSecs: maxTimer, settleGraceSecs: graceSecs,
   keeper: keeperKey.toBase58(),
-  buyback: `≤ ${maxBuybackSol} SOL every ≥ ${env('BUYBACK_GAP_SECS', '300')}s`,
+  team: teamKey.toBase58(),
 };
 console.error('\nLaunch plan:'); console.error(plan);
 if (!local && process.env.CONFIRM_MAINNET !== 'yes') {
@@ -62,12 +61,10 @@ const res = await launch(connection, authority, {
     initialTimer: new BN(maxTimer),
     settleGraceSecs: new BN(graceSecs),
   },
-  keeper: keeperKey,
-  maxBuybackLamports: new BN(maxBuybackSol * LAMPORTS_PER_SOL),
-  buybackGapSecs: new BN(env('BUYBACK_GAP_SECS', '300')),
+  roles: { keeper: keeperKey, team: teamKey },
 });
 
 console.log(JSON.stringify({
   mint: res.mint.toBase58(), dbcConfig: res.config.toBase58(), dbcPool: res.pool.toBase58(),
-  game: res.game.toBase58(), treasury: res.treasury.toBase58(),
+  game: res.game.toBase58(), feeAddress: res.treasury.toBase58(),
 }, null, 2));

@@ -1,15 +1,17 @@
-// Attaching to a token someone else launched (./localnet.sh). A "friend" launches FOMO on
-// Meteora DBC with their own fee wallet; the normal initialize must refuse it, attach must
-// work, and the game then runs on it: buys tracked and recorded, jackpot funded with FOMO
-// (fund_jackpot) and SOL (fund_sol → keeper buyback 70/20/10), and the winner paid.
+// A token launched by someone else on Meteora DBC (./localnet.sh), with the fees routed to
+// the game's fee address the two ways a launcher can:
+//  A. the fee address is the config's fee claimer (set at launch);
+//  B. the launcher keeps the fee claimer but hands the pool's creator rights to the fee
+//     address right after launch.
+// Plus the two launches the game must refuse: fees going elsewhere, and fees not in SOL.
+// For A and B: buys recorded, fees split 80% jackpot / 20% team, winner paid in SOL.
 import assert from 'node:assert/strict';
-import { DynamicBondingCurveClient, SwapMode, deriveDbcPoolAddress } from '@meteora-ag/dynamic-bonding-curve-sdk';
-import { NATIVE_MINT, TOKEN_PROGRAM_ID, getAccount, getAssociatedTokenAddressSync } from '@solana/spl-token';
-import { Connection, Keypair, LAMPORTS_PER_SOL, SystemProgram } from '@solana/web3.js';
+import { CollectFeeMode, DynamicBondingCurveClient, SwapMode } from '@meteora-ag/dynamic-bonding-curve-sdk';
+import { NATIVE_MINT, TOKEN_PROGRAM_ID } from '@solana/spl-token';
+import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram } from '@solana/web3.js';
 import BN from 'bn.js';
 import {
-  DEFAULT_LAUNCH, DAMM_V2_CONFIGS, attach, buybackDbc, fomocity, fundJackpot, fundSol, gameAddresses, harvestDbc,
-  launchCurve, readGame, recordBuy, send, settle,
+  DEFAULT_LAUNCH, attach, feeAddress, fomocity, harvestDbc, launchCurve, readGame, recordBuy, send, settle,
 } from './lib.ts';
 import { track, type Trade } from './tracker.ts';
 
@@ -19,6 +21,10 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const step = (s: string) => console.log(`▸ ${s}`);
 const big = (v: BN | bigint | number) => BigInt(v.toString());
 const P = { minBuy: 0.05 * LAMPORTS_PER_SOL, timeAdd: 5, maxTimer: 15, initial: 15, grace: 2 };
+const params = {
+  minBuyLamports: new BN(P.minBuy), timeAddPerBuy: new BN(P.timeAdd), maxTimer: new BN(P.maxTimer),
+  initialTimer: new BN(P.initial), settleGraceSecs: new BN(P.grace),
+};
 
 async function funded(n: number) {
   const kp = Keypair.generate();
@@ -33,101 +39,91 @@ async function expectError(p: Promise<unknown>, name: string) {
   }
   assert.fail(`expected ${name}, but it succeeded`);
 }
-const chainNow = async () => (await connection.getBlockTime(await connection.getSlot('confirmed')))!;
+const chainNow = async () => Number((await connection.getAccountInfo(new PublicKey('SysvarC1ock11111111111111111111111111111111'), 'confirmed'))!.data.readBigInt64LE(32));
 async function waitUntil(ts: number) { while ((await chainNow()) < ts) await sleep(500); }
 
-async function main() {
-  const [friend, operator, keeper, alice, bob] = await Promise.all([funded(30), funded(10), funded(5), funded(10), funded(10)]);
-
-  step("friend launches FOMO on Meteora DBC the usual way (fees go to the friend)");
-  const mint = Keypair.generate();
-  const config = Keypair.generate();
-  const curve = launchCurve({ ...DEFAULT_LAUNCH, migrationQuoteThresholdSol: 50, antiSniper: { startingFeeBps: 1_000, endingFeeBps: 100, numberOfPeriod: 2, totalDurationSecs: 2 } });
+/** A launch the way a launcher would do it, outside our launch script. */
+async function friendLaunch(friend: Keypair, opts: { feeClaimer: PublicKey; collectFeeMode?: CollectFeeMode }) {
+  const mint = Keypair.generate(), config = Keypair.generate();
+  const curve = launchCurve({ ...DEFAULT_LAUNCH, migrationQuoteThresholdSol: 50 });
+  if (opts.collectFeeMode !== undefined) curve.collectFeeMode = opts.collectFeeMode;
   await send(connection, await dbc.partner.createConfig({
-    config: config.publicKey, feeClaimer: friend.publicKey, leftoverReceiver: friend.publicKey,
+    config: config.publicKey, feeClaimer: opts.feeClaimer, leftoverReceiver: friend.publicKey,
     quoteMint: NATIVE_MINT, payer: friend.publicKey, ...curve,
   }), [friend, config]);
   await send(connection, await dbc.creator.createPool({
-    name: 'FOMO', symbol: 'FOMO', uri: 'https://example.com/fomo.json',
-    payer: friend.publicKey, poolCreator: friend.publicKey, config: config.publicKey, baseMint: mint.publicKey,
+    name: 'FOMO', symbol: 'FOMO', uri: 'https://example.com/fomo.json', payer: friend.publicKey,
+    poolCreator: friend.publicKey, config: config.publicKey, baseMint: mint.publicKey,
   }), [friend, mint]);
-  const pool = deriveDbcPoolAddress(NATIVE_MINT, mint.publicKey, config.publicKey);
-  await sleep(3_000); // let the short launch fee window pass
+  return { mint: mint.publicKey, pool: (await dbc.state.getPoolByBaseMint(mint.publicKey))!.publicKey };
+}
 
-  const params = {
-    minBuyLamports: new BN(P.minBuy), timeAddPerBuy: new BN(P.timeAdd), maxTimer: new BN(P.maxTimer),
-    initialTimer: new BN(P.initial), settleGraceSecs: new BN(P.grace),
-  };
-  const buyback = { keeper: keeper.publicKey, maxLamports: new BN(LAMPORTS_PER_SOL), minGapSecs: new BN(0), dammConfig: DAMM_V2_CONFIGS[DEFAULT_LAUNCH.migrationFeeOption] };
-  const a = gameAddresses(mint.publicKey);
+async function playRound(label: string, operator: Keypair, keeper: Keypair, team: Keypair, launched: { mint: PublicKey; pool: PublicKey }) {
+  step(`${label}: attach by CA`);
+  await attach(connection, operator, { mint: launched.mint, params, roles: { keeper: keeper.publicKey, team: team.publicKey } });
   const program = fomocity(connection, operator);
+  let g = await readGame(program, launched.mint);
 
-  step('the normal setup refuses it: the game does not get this pool\'s fees');
-  await expectError(program.methods.initialize(params, buyback).accountsStrict({
-    authority: operator.publicKey, mint: mint.publicKey, quoteMint: NATIVE_MINT, game: a.game, treasury: a.treasury,
-    vault: a.vault, wsolVault: a.wsolVault, stash: a.stash, round: a.round(1), dbcPool: pool, dbcConfig: config.publicKey,
-    tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
-  }).rpc(), 'TreasuryNotCreator');
-
-  step('attach by CA works');
-  const attached = await attach(connection, operator, {
-    mint: mint.publicKey, params, keeper: keeper.publicKey, maxBuybackLamports: new BN(LAMPORTS_PER_SOL), buybackGapSecs: new BN(0),
-  });
-  assert.equal(attached.pool.toBase58(), pool.toBase58(), 'found the pool from the CA');
-  let g = await readGame(program, mint.publicKey);
-  assert.equal(g.data.external, true);
-  assert.equal(g.data.dbcPool.toBase58(), pool.toBase58());
-  const fetchRound = async (id: number) => (program.account as any).round.fetch(g.round(id));
-
-  step('players buy on Meteora; the keeper records them');
-  const swap = async (kp: Keypair, sol: number) => send(connection, await dbc.pool.swap2({
-    owner: kp.publicKey, pool, swapBaseForQuote: false, referralTokenAccount: null,
-    swapMode: SwapMode.ExactIn, amountIn: new BN(sol * LAMPORTS_PER_SOL), minimumAmountOut: new BN(0),
-  }), [kp]);
-  await swap(alice, 0.3);
-  await swap(bob, 0.2);
-  await swap(friend, 1); // the friend buys FOMO too, to fund the jackpot with tokens
+  step(`${label}: players buy on Meteora; the keeper records them`);
+  const [alice, bob] = await Promise.all([funded(5), funded(5)]);
+  for (const [kp, sol] of [[alice, 0.4], [bob, 0.3]] as const) {
+    await send(connection, await dbc.pool.swap2({
+      owner: kp.publicKey, pool: launched.pool, swapBaseForQuote: false, referralTokenAccount: null,
+      swapMode: SwapMode.ExactIn, amountIn: new BN(sol * LAMPORTS_PER_SOL), minimumAmountOut: new BN(0),
+    }), [kp]);
+    await sleep(1_200);
+  }
   const trades: Trade[] = [];
-  await track(connection, mint.publicKey, (t) => trades.push(t));
-  const kp = fomocity(connection, keeper);
-  for (const t of trades.filter((t) => t.side === 'buy' && t.wallet !== friend.publicKey.toBase58())) await recordBuy(kp, keeper, g, t);
-  let r1 = await fetchRound(1);
-  assert.equal(r1.buyCount, 2);
-  assert.equal(r1.lastBuyer.toBase58(), bob.publicKey.toBase58());
+  await track(connection, launched.mint, (t) => trades.push(t));
+  for (const t of trades.filter((t) => t.side === 'buy')) await recordBuy(fomocity(connection, keeper), keeper, g, t);
 
-  step('fee harvests are refused (the fees belong to the friend)');
-  await expectError(harvestDbc(program, g), 'Error');
+  step(`${label}: fees claimed automatically, 80% jackpot / 20% team`);
+  await harvestDbc(program, g);
+  g = await readGame(program, launched.mint);
+  const harvested = big(g.data.stats.harvestedLamports);
+  assert.ok(harvested > 0n, 'fees reached the game');
+  const r1: any = await (program.account as any).round.fetch(g.round(1));
+  assert.equal(big(r1.jackpot), harvested - (harvested * 2000n) / 10000n);
+  assert.equal(big(g.data.teamOwed), (harvested * 2000n) / 10000n);
 
-  step('fund_jackpot: friend adds FOMO straight to the jackpot');
-  const friendAta = getAssociatedTokenAddressSync(mint.publicKey, friend.publicKey);
-  const addTokens = new BN((await getAccount(connection, friendAta)).amount.toString()).divn(4);
-  const jp0 = big(r1.jackpot);
-  await fundJackpot(fomocity(connection, friend), friend, g, addTokens);
-  r1 = await fetchRound(1);
-  assert.equal(big(r1.jackpot) - jp0, big(addTokens), 'jackpot += exactly the tokens sent');
-
-  step('fund_sol: friend sends SOL; the keeper buys back 70/20/10');
-  const wsol0 = big((await getAccount(connection, g.wsolVault)).amount);
-  await fundSol(fomocity(connection, friend), friend, g, new BN(0.5 * LAMPORTS_PER_SOL));
-  assert.equal(big((await getAccount(connection, g.wsolVault)).amount) - wsol0, BigInt(0.5 * LAMPORTS_PER_SOL));
-  const jp1 = big(r1.jackpot);
-  await buybackDbc(program, keeper, g, new BN(0.5 * LAMPORTS_PER_SOL));
-  g = await readGame(program, mint.publicKey);
-  const out = big(g.data.stats.boughtTokens);
-  r1 = await fetchRound(1);
-  assert.equal(big(r1.jackpot) - jp1, out - (out * 2000n) / 10000n - (out * 1000n) / 10000n, '70% of the buyback');
-
-  step('round ends: the last buyer is paid the whole jackpot');
-  const jackpot = big(r1.jackpot);
+  step(`${label}: bob wins the jackpot in SOL`);
   await waitUntil(r1.endTs.toNumber() + P.grace);
-  const bobAta = getAssociatedTokenAddressSync(mint.publicKey, bob.publicKey);
-  const bob0 = (await getAccount(connection, bobAta)).amount;
+  const bob0 = BigInt(await connection.getBalance(bob.publicKey, 'confirmed'));
   await settle(program, g, operator.publicKey);
-  assert.equal((await getAccount(connection, bobAta)).amount - bob0, jackpot);
-  g = await readGame(program, mint.publicKey);
-  assert.equal(g.data.winners.find((w: any) => big(w.round) === 1n).wallet.toBase58(), bob.publicKey.toBase58());
+  const rent = BigInt(await connection.getMinimumBalanceForRentExemption(165));
+  assert.equal(BigInt(await connection.getBalance(bob.publicKey, 'confirmed')) - bob0, big(r1.jackpot) + rent);
+  return harvested;
+}
 
-  console.log('\n✓ Attach mode checks passed.');
+async function main() {
+  const [friend, operator, keeper] = await Promise.all([funded(40), funded(20), funded(5)]);
+  const team = Keypair.generate();
+  const fee = feeAddress();
+
+  step('refused: fees going to the launcher only');
+  const elsewhere = await friendLaunch(friend, { feeClaimer: friend.publicKey });
+  await expectError(attach(connection, operator, { mint: elsewhere.mint, params, roles: { keeper: keeper.publicKey, team: team.publicKey } }), 'neither');
+
+  step('refused: fees not collected in SOL');
+  const notSol = await friendLaunch(friend, { feeClaimer: fee, collectFeeMode: CollectFeeMode.OutputToken });
+  await expectError(fomocity(connection, operator).methods.initialize(params, { keeper: keeper.publicKey, team: team.publicKey, dammConfig: PublicKey.default })
+    .accountsPartial({ authority: operator.publicKey, mint: notSol.mint, quoteMint: NATIVE_MINT, dbcPool: notSol.pool, dbcConfig: (await dbc.state.getPool(notSol.pool))!.poolState.config, tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId })
+    .rpc(), 'FeesNotInSol');
+
+  // A: fee claimer set to the game's fee address at launch.
+  const a = await friendLaunch(friend, { feeClaimer: fee });
+  const harvestedA = await playRound('A (fee claimer)', operator, keeper, team, a);
+
+  // B: launcher keeps the fee claimer, hands creator rights to the fee address right after
+  // launching. (Each game has its own vault, so two games can share the fee address.)
+  const b = await friendLaunch(friend, { feeClaimer: friend.publicKey });
+  await send(connection, await dbc.creator.transferPoolCreator({ pool: b.pool, creator: friend.publicKey, newCreator: fee }), [friend]);
+  const { findLaunch } = await import('./lib.ts');
+  const infoB = await findLaunch(connection, b.mint);
+  assert.ok(infoB.isCreator && !infoB.isFeeClaimer && infoB.feesToGame, 'creator transfer routes the creator share to the game');
+  const harvestedB = await playRound('B (creator transfer)', operator, keeper, team, b);
+
+  console.log(`\n✓ Attach checks passed (fees A: ${harvestedA} lamports, B: ${harvestedB} lamports).`);
   process.exit(0);
 }
 

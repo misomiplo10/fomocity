@@ -24,9 +24,6 @@ export function createUI({ backend, camera, plaza }) {
   const P = backend.params;
   const MI = backend.marketInfo ?? MARKET;
   const chain = backend.mode !== 'sim';
-  // Attached to a token launched elsewhere: its trading fees go to its creator, so the
-  // jackpot is funded by top-ups (SOL is bought back 70/20/10, FOMO goes straight in).
-  const external = !!MI.external;
   const mint = backend.mint ?? null;
   // Links out to explorers and a swap page. The site itself never moves funds.
   const walletLink = (w) => (chain && w ? `https://solscan.io/account/${w}` : null);
@@ -50,9 +47,10 @@ export function createUI({ backend, camera, plaza }) {
       <div class="hint" id="curvetxt"></div>
       <div class="row"><span>Token price</span><b id="mprice"></b></div>
       <div class="row"><span>Swap fee</span><b id="mfee"></b></div>
-      <div class="row"><span>${external ? 'Jackpot funding' : 'Treasury fees'}</span><b id="mtreasury"></b></div>
-      <div class="row"><span>Bought back</span><b id="mbought"></b></div>
-      <div class="row"><span>Burned</span><b id="mburned"></b></div>
+      <div class="row"><span>Fees waiting</span><b id="mwaiting"></b></div>
+      <div class="row"><span>Fees collected</span><b id="mcollected"></b></div>
+      <div class="row"><span>→ Jackpots (80%)</span><b id="mjackpots"></b></div>
+      <div class="row"><span>→ Team (20%)</span><b id="mteam"></b></div>
     </div>
     <div id="side" class="panel">
       <h3>How to play</h3>
@@ -85,13 +83,9 @@ export function createUI({ backend, camera, plaza }) {
       <li>A buy counts when it puts at least <b>${G.fmtSol(P.minBuyLamports, 2)}</b> into the token's Meteora pool. Sells never count.</li>
       <li>Every counted buy adds <b>${P.timeAddPerBuy}s</b> to the countdown, which never shows more than <b>${clock(P.maxTimer)}</b>.</li>
       <li>When it hits zero, the <b>last buyer wins the whole jackpot</b>. It's sent to their wallet automatically; no claiming. Everyone else gets nothing from the round.</li>
-      ${external
-        ? `<li>The jackpot is <b>funded by the token's creator and the community</b>, not automatically by trading fees. Anyone can top it up: SOL sent to the game is used to buy FOMO back (<b>${G.BUYBACK_SPLIT.jackpot / 100}%</b> to this round's jackpot · <b>${G.BUYBACK_SPLIT.nextRound / 100}%</b> to the next round · <b>${G.BUYBACK_SPLIT.burn / 100}%</b> burned), and FOMO sent to the game goes straight into the jackpot.</li>`
-        : `<li>The jackpot comes from <b>Meteora trading fees</b>: the game collects 80% of them in SOL (Meteora keeps 20%) and buys FOMO back: <b>${G.BUYBACK_SPLIT.jackpot / 100}%</b> to this round's jackpot · <b>${G.BUYBACK_SPLIT.nextRound / 100}%</b> to the next round · <b>${G.BUYBACK_SPLIT.burn / 100}%</b> burned.</li>
-      <li>Launch fees start at <b>${MI.sniperFeeBps / 100}%</b>${MI.baseFeeBps ? ` and fall to <b>${MI.baseFeeBps / 100}%</b>` : ' and fall over the first minutes'}, so early snipers pay into the pot.</li>`}
-      ${external
-        ? `<li>The token trades on Meteora: first on a bonding curve, then in a regular Meteora pool.</li>`
-        : `<li>The token trades on a Meteora bonding curve, then in a regular pool whose liquidity is <b>locked forever</b>.</li>`}
+      <li>The jackpot is paid in <b>SOL</b> and funded by <b>trading fees</b>: every trade of the token pays a fee on Meteora, the game collects its share, and splits it <b>${G.FEE_SPLIT.jackpot / 100}% to the jackpot</b> and <b>${G.FEE_SPLIT.team / 100}% to the team</b>. Anyone can also add SOL to the jackpot.</li>
+      <li>Fees collected after the clock hits zero go to the next round's jackpot.</li>
+      <li>The token trades on Meteora: first on a bonding curve, then in a regular Meteora pool.</li>
       <li>Buys are spotted on-chain by the game's keeper and recorded in an open-source program together with their transaction signature, so anyone can check every recorded buy and every payout.</li>
       <li>A round with no buys carries its jackpot into the next one.</li>
     </ul>
@@ -120,8 +114,8 @@ export function createUI({ backend, camera, plaza }) {
   const push = (html) => { feed.insertAdjacentHTML('afterbegin', html); while (feed.children.length > 14) feed.lastChild.remove(); };
   backend.on((e) => {
     if (e.type === 'buy') push(`<li><b>${nameHtml(e.who)}</b><span>${G.fmtSol(e.lamports)}</span></li>`);
-    if (e.type === 'funded') push(`<li class="bb"><b>◆ Jackpot top-up</b><span>${e.tokens ? `+${G.fmt(e.tokens)}` : G.fmtSol(e.lamports)}</span></li>`);
-    if (e.type === 'buyback') push(`<li class="bb"><b>◆ Buyback</b> ${e.sol.toFixed(3)} SOL <span>+${G.fmt(e.toJackpot)}</span></li>`);
+    if (e.type === 'funded') push(`<li class="bb"><b>◆ Jackpot top-up</b><span>+${G.fmtSol(e.lamports)}</span></li>`);
+    if (e.type === 'fees') push(`<li class="bb"><b>◆ Fees → jackpot</b><span>+${G.fmtSol(e.toJackpot, 4)}</span></li>`);
     if (e.type === 'curveComplete' || e.type === 'migrated') {
       const done = e.type === 'migrated';
       push(`<li class="bb"><b>◆ ${done ? 'Migrated to DAMM v2' : 'Bonding curve complete'}</b></li>`);
@@ -130,9 +124,9 @@ export function createUI({ backend, camera, plaza }) {
         : `<div>BONDING CURVE COMPLETE</div><big>${MI.thresholdSol} SOL</big><div>Migrating to a Meteora pool…</div>`, 'meteora', 4500);
     }
     if (e.type === 'settled') {
-      if (e.winner) push(`<li class="win"><b>🏆 #${e.round} ${nameHtml(e.winner)}</b><span>${G.fmt(e.payout)}</span></li>`);
+      if (e.winner) push(`<li class="win"><b>🏆 #${e.round} ${nameHtml(e.winner)}</b><span>${G.fmtSol(e.payout)}</span></li>`);
       showBanner(e.winner
-        ? `<div>ROUND ${e.round} WINNER</div><big>${nameHtml(e.winner)}</big><div>won ${G.fmt(e.payout)} FOMO · paid automatically</div>`
+        ? `<div>ROUND ${e.round} WINNER</div><big>${nameHtml(e.winner)}</big><div>won ${G.fmtSol(e.payout)} · paid automatically</div>`
         : `<div>ROUND ${e.round} OVER</div><div>No buys. Jackpot carries over.</div>`, 'win', 6500);
     }
   });
@@ -158,15 +152,15 @@ export function createUI({ backend, camera, plaza }) {
       timer.classList.toggle('hot', !settling && r.buyCount > 0 && left < 30);
       timer.classList.toggle('settling', settling);
       $('#round').textContent = r.id;
-      $('#jackpot').textContent = G.fmt(r.jackpot);
+      $('#jackpot').textContent = G.fmtSol(r.jackpot);
       $('#buys').textContent = r.buyCount.toLocaleString();
       $('#last').innerHTML = r.lastBuyer ? nameHtml(r.lastBuyer) : '—';
       $('#vol').textContent = G.fmtSol(r.totalLamports, 2);
-      $('#seed').textContent = G.fmt(r.nextRoundPot);
+      $('#seed').textContent = G.fmtSol(r.nextRoundPot);
 
       const winners = (backend.winners ?? []).slice(0, 6);
       const wHtml = winners.length
-        ? winners.map((w) => `<li><span class="r">#${w.round}</span> ${nameHtml(w.wallet)} <span>${G.fmt(w.amount)}</span><small>${ago(w.ts)}</small></li>`).join('')
+        ? winners.map((w) => `<li><span class="r">#${w.round}</span> ${nameHtml(w.wallet)} <span>${G.fmtSol(w.amount)}</span><small>${ago(w.ts)}</small></li>`).join('')
         : '<li class="dim">No winners yet</li>';
       if (wHtml !== lastWinners) { $('#winners').innerHTML = wHtml; lastWinners = wHtml; }
 
@@ -182,10 +176,11 @@ export function createUI({ backend, camera, plaza }) {
         $('#mprice').textContent = m.price >= 1e-6 ? `${m.price.toPrecision(3)} SOL` : `${(m.price * 1e6).toPrecision(3)} SOL / 1M`;
         const fee = $('#mfee');
         fee.textContent = `${(m.feeBps / 100).toFixed(m.feeBps < 1000 ? 2 : 1)}%`;
-        fee.className = m.feeBps > MI.keeperMaxFeeBps ? 'hot' : '';
-        $('#mtreasury').textContent = `${(m.unclaimedSol + m.wsolSol).toFixed(4)} SOL`;
-        $('#mbought').textContent = G.fmt(m.boughtTokens);
-        $('#mburned').textContent = G.fmt(m.burnedTokens);
+        fee.className = m.feeBps > 500 ? 'hot' : '';
+        $('#mwaiting').textContent = `${m.unclaimedSol.toFixed(4)} SOL`;
+        $('#mcollected').textContent = `${m.collectedSol.toFixed(4)} SOL`;
+        $('#mjackpots').textContent = `${m.toJackpotSol.toFixed(4)} SOL`;
+        $('#mteam').textContent = `${m.toTeamSol.toFixed(4)} SOL`;
       }
 
       const anchors = plaza.labelAnchors();

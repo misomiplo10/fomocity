@@ -6,10 +6,10 @@ import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { utils } from '@coral-xyz/anchor';
 import { DynamicBondingCurveClient, SwapMode } from '@meteora-ag/dynamic-bonding-curve-sdk';
-import { TOKEN_PROGRAM_ID, getAccount, getAssociatedTokenAddressSync } from '@solana/spl-token';
+import { NATIVE_MINT, TOKEN_PROGRAM_ID, getAccount } from '@solana/spl-token';
 import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SYSVAR_CLOCK_PUBKEY, SystemProgram } from '@solana/web3.js';
 import BN from 'bn.js';
-import { buybackDbc, fomocity, harvestDbc, launch, readGame, recordBuy, send, settle, type GameState } from './lib.ts';
+import { fomocity, harvestDbc, launch, readGame, recordBuy, send, settle, withdrawTeam, type GameState } from './lib.ts';
 import { track, type Trade } from './tracker.ts';
 
 const connection = new Connection('http://127.0.0.1:8899', 'confirmed');
@@ -42,15 +42,20 @@ async function waitUntil(ts: number) { while ((await chainNow()) < ts) await sle
 
 async function main() {
   const [authority, keeper, alice, bob, carol] = await Promise.all([funded(30), funded(5), funded(10), funded(10), funded(5)]);
+  const team = Keypair.generate();
+  // Settling or paying the team passes SOL through a temporary account whose rent also goes
+  // to the recipient (paid by whoever cranks).
+  const payoutRent = BigInt(await connection.getMinimumBalanceForRentExemption(165));
+  const lamportsOf = async (k: PublicKey) => BigInt(await connection.getBalance(k, 'confirmed'));
 
   step('launch: 0.05 SOL minimum, +5s per buy, 25s cap, 20s start, 3s grace');
   const g0 = await launch(connection, authority, {
-    launch: { migrationQuoteThresholdSol: 50, antiSniper: { startingFeeBps: 1_000, endingFeeBps: 100, numberOfPeriod: 2, totalDurationSecs: 2 } },
+    launch: { migrationQuoteThresholdSol: 50 },
     params: {
       minBuyLamports: new BN(P.minBuy), timeAddPerBuy: new BN(P.timeAdd), maxTimer: new BN(P.maxTimer),
       initialTimer: new BN(P.initial), settleGraceSecs: new BN(P.grace),
     },
-    keeper: keeper.publicKey, maxBuybackLamports: new BN(LAMPORTS_PER_SOL), buybackGapSecs: new BN(0),
+    roles: { keeper: keeper.publicKey, team: team.publicKey },
   });
   const program = fomocity(connection, authority);
   let g: GameState = await readGame(program, g0.mint);
@@ -101,13 +106,17 @@ async function main() {
   const recent = g.data.recent.filter((b: any) => !b.wallet.equals(PublicKey.default));
   assert.deepEqual(recent.map((b: any) => b.wallet.toBase58()), [ta.wallet, tb.wallet], 'recent buys list');
 
-  step('trading fees → buyback → jackpot');
+  step('trading fees: 80% to the jackpot, 20% to the team');
+  const fees = BigInt((await new DynamicBondingCurveClient(connection, 'confirmed').state.getPool(g0.pool))!.poolState.partnerQuoteFee
+    .add((await new DynamicBondingCurveClient(connection, 'confirmed').state.getPool(g0.pool))!.poolState.creatorQuoteFee).toString());
+  assert.ok(fees > 0n, 'the buys paid trading fees');
   await harvestDbc(program, g);
-  g = await readGame(program, g0.mint);
-  await buybackDbc(program, keeper, g, new BN((await getAccount(connection, g.wsolVault)).amount.toString()));
   r1 = await fetchRound(1);
+  g = await readGame(program, g0.mint);
+  const toTeam = (fees * 2000n) / 10000n;
+  assert.equal(big(r1.jackpot), fees - toTeam, '80% to the jackpot');
+  assert.equal(big(g.data.teamOwed), toTeam, '20% owed to the team');
   const jackpot = big(r1.jackpot);
-  assert.ok(jackpot > 0n, 'jackpot funded');
 
   step('a buy after the deadline is rejected; settle waits for the grace period');
   await waitUntil(r1.endTs.toNumber());
@@ -116,18 +125,18 @@ async function main() {
   await waitUntil(r1.endTs.toNumber() + P.grace);
 
   step('settle must pay the last buyer, not anyone else');
-  const settleWith = (winnerTokenAccount: PublicKey | null) => fomocity(connection, carol).methods.settle().accountsStrict({
-    cranker: carol.publicKey, game: g.game, mint: g.mint, round: g.round(1), nextRound: g.round(2), vault: g.vault,
-    winnerTokenAccount: winnerTokenAccount as any, tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
+  const settleWith = (winner: PublicKey | null) => fomocity(connection, carol).methods.settle().accountsStrict({
+    cranker: carol.publicKey, game: g.game, round: g.round(1), nextRound: g.round(2), treasury: g.treasury,
+    wsolVault: g.wsolVault, quoteMint: NATIVE_MINT, payout: g.payout, winner: winner as any,
+    tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
   }).rpc();
-  const ataOf = (kp: Keypair) => getAssociatedTokenAddressSync(g.mint, kp.publicKey);
-  await expectError(settleWith(ataOf(alice)), 'ConstraintTokenOwner');
+  await expectError(settleWith(alice.publicKey), 'WinnerAccountMismatch');
   await expectError(settleWith(null), 'WinnerAccountMismatch');
 
-  step('settle by anyone pays bob the jackpot automatically');
-  const bob0 = (await getAccount(connection, ataOf(bob))).amount;
+  step('settle by anyone pays bob the jackpot, in SOL, automatically');
+  const bob0 = await lamportsOf(bob.publicKey);
   await settle(fomocity(connection, carol), g, carol.publicKey);
-  assert.equal((await getAccount(connection, ataOf(bob))).amount - bob0, jackpot, 'bob received the jackpot');
+  assert.equal(await lamportsOf(bob.publicKey) - bob0, jackpot + payoutRent, 'bob received the jackpot as SOL');
   r1 = await fetchRound(1);
   assert.ok(r1.settled && r1.jackpotPaid);
   g = await readGame(program, g0.mint);
@@ -147,9 +156,17 @@ async function main() {
   assert.equal(big(r3.jackpot), big(r2.jackpot) + big(r2.nextRoundPot));
   assert.equal(g.data.winners.filter((w: any) => !w.wallet.equals(PublicKey.default)).length, 1, 'no new winner');
 
-  step('vault holds exactly what is still owed');
-  const vault = (await getAccount(connection, g.vault)).amount;
-  assert.ok(vault >= big(r3.jackpot) && vault - big(r3.jackpot) < 10n, `vault ${vault} vs owed ${r3.jackpot}`);
+  step('the SOL vault holds exactly what is still owed');
+  const vault = (await getAccount(connection, g.wsolVault)).amount;
+  assert.equal(vault, big(r3.jackpot) + big(r3.nextRoundPot) + big(g.data.teamOwed));
+
+  step("team share goes to the team wallet as SOL (anyone can trigger it)");
+  const owed = big(g.data.teamOwed);
+  await withdrawTeam(fomocity(connection, carol), g, carol.publicKey);
+  assert.equal(await lamportsOf(team.publicKey), owed + payoutRent);
+  g = await readGame(program, g0.mint);
+  assert.equal(big(g.data.teamOwed), 0n);
+  await expectError(withdrawTeam(program, g, authority.publicKey), 'NothingToClaim');
 
   step('admin hands off and renounces');
   const ms = Keypair.generate();

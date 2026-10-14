@@ -1,10 +1,11 @@
 // Pure game engine. Mirrors programs/fomocity/src/lib.rs exactly: same params, same
-// countdown math, same buyback split. Token amounts are integer base units (6 decimals)
-// and SOL amounts are lamports, so JS math matches the program's u64s.
+// countdown math, same fee split. All SOL amounts (buys, jackpots) are integer lamports, so
+// JS math matches the program's u64s.
 //
 // Playing = buying the game token anywhere. Each qualifying buy (at least
 // `minBuyLamports` of SOL into the pool) adds time to the countdown; when it runs out, the
-// last buyer is paid the whole jackpot automatically.
+// last buyer is paid the whole jackpot, in SOL, automatically. The jackpot is funded by the
+// token's trading fees: 80% to the jackpot, 20% to the team.
 
 export const DECIMALS = 6;
 export const UNIT = 10 ** DECIMALS;
@@ -18,12 +19,10 @@ export const DEFAULT_PARAMS = {
   settleGraceSecs: 60,             // wait after zero for late-reported buys
 };
 
-// Meteora fee flywheel: trading fees (SOL) are harvested by the treasury PDA and swapped
-// for the game token. The output is split like this (jackpot takes the rounding dust).
-export const BUYBACK_SPLIT = {
-  jackpot: 7_000,
-  nextRound: 2_000,
-  burn: 1_000,
+// Trading fees claimed by the game are split like this (jackpot takes the rounding dust).
+export const FEE_SPLIT = {
+  jackpot: 8_000,
+  team: 2_000,
 };
 
 const bp = (amount, bps) => Math.floor((amount * bps) / 10_000);
@@ -77,21 +76,18 @@ export function settle(round, params, now) {
   return { winner: round.winner, payout, carry };
 }
 
-// Mirrors split_buyback in lib.rs.
-export function splitBuyback(out) {
-  const toNext = bp(out, BUYBACK_SPLIT.nextRound);
-  const burn = bp(out, BUYBACK_SPLIT.burn);
-  return { toJackpot: out - toNext - burn, toNext, burn };
+// Mirrors split_fees in lib.rs.
+export function splitFees(lamports) {
+  const toTeam = bp(lamports, FEE_SPLIT.team);
+  return { toJackpot: lamports - toTeam, toTeam };
 }
 
-// Mirrors distribute_buyback in lib.rs: once the timer has run out, the winner is already
-// decided, so the jackpot share goes to the next round instead.
-export function fundFromBuyback(round, out, now) {
-  let { toJackpot, toNext, burn } = splitBuyback(out);
-  if (!isLive(round, now)) { toNext += toJackpot; toJackpot = 0; }
-  round.jackpot += toJackpot;
-  round.nextRoundPot += toNext;
-  return { out, toJackpot, toNext, burn };
+// Mirrors credit_fees in lib.rs: once the timer has run out, the winner is already decided,
+// so the jackpot share goes to the next round instead.
+export function fundFromFees(round, lamports, now) {
+  const { toJackpot, toTeam } = splitFees(lamports);
+  if (isLive(round, now)) round.jackpot += toJackpot; else round.nextRoundPot += toJackpot;
+  return { lamports, toJackpot, toTeam };
 }
 
 // Token amounts for display. Real launches deal in millions of tokens, so large values

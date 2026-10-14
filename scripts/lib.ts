@@ -66,14 +66,21 @@ export function fomocity(connection: Connection, payer: Keypair): Program {
 const pda = (seeds: (Buffer | Uint8Array)[]) => PublicKey.findProgramAddressSync(seeds, PROGRAM_ID)[0];
 const u64le = (n: number | bigint) => { const b = Buffer.alloc(8); b.writeBigUInt64LE(BigInt(n)); return b; };
 
+/**
+ * The game's fee address: the treasury PDA. It depends only on the program, not on the token,
+ * so the launcher can set it as the pool's fee claimer (or hand it the pool's creator rights)
+ * before or right after launching.
+ */
+export const feeAddress = () => pda([Buffer.from('treasury')]);
+
 export function gameAddresses(mint: PublicKey) {
   const game = pda([Buffer.from('game'), mint.toBuffer()]);
   return {
     game,
-    treasury: pda([Buffer.from('treasury'), game.toBuffer()]),
-    vault: pda([Buffer.from('vault'), mint.toBuffer()]),
+    treasury: feeAddress(),
     wsolVault: pda([Buffer.from('wsol'), game.toBuffer()]),
     stash: pda([Buffer.from('stash'), game.toBuffer()]),
+    payout: pda([Buffer.from('payout'), game.toBuffer()]),
     round: (id: number | bigint) => pda([Buffer.from('round'), game.toBuffer(), u64le(id)]),
   };
 }
@@ -87,7 +94,8 @@ export type LaunchOptions = {
   totalSupply: number;               // whole tokens
   migrationQuoteThresholdSol: number;
   percentageSupplyOnMigration: number;
-  antiSniper: { startingFeeBps: number; endingFeeBps: number; numberOfPeriod: number; totalDurationSecs: number };
+  /** Trading fee schedule. Equal start and end = a flat fee. */
+  fee: { startingFeeBps: number; endingFeeBps: number; numberOfPeriod: number; totalDurationSecs: number };
   migrationFeeOption: MigrationFeeOption;
 };
 
@@ -98,8 +106,8 @@ export const DEFAULT_LAUNCH: LaunchOptions = {
   totalSupply: 1_000_000_000,
   migrationQuoteThresholdSol: 85,
   percentageSupplyOnMigration: 20,
-  // 50% fee at launch, decaying exponentially to 1% over 2 minutes. Snipers fund the pot.
-  antiSniper: { startingFeeBps: 5_000, endingFeeBps: 100, numberOfPeriod: 60, totalDurationSecs: 120 },
+  // Flat 3% trading fee, no launch sniper fee.
+  fee: { startingFeeBps: 300, endingFeeBps: 300, numberOfPeriod: 0, totalDurationSecs: 0 },
   migrationFeeOption: MigrationFeeOption.FixedBps100,
 };
 
@@ -115,19 +123,19 @@ export function launchCurve(o: LaunchOptions) {
     },
     fee: {
       baseFeeParams: {
-        baseFeeMode: BaseFeeMode.FeeSchedulerExponential,
+        baseFeeMode: BaseFeeMode.FeeSchedulerLinear,
         feeSchedulerParam: {
-          startingFeeBps: o.antiSniper.startingFeeBps,
-          endingFeeBps: o.antiSniper.endingFeeBps,
-          numberOfPeriod: o.antiSniper.numberOfPeriod,
-          totalDuration: o.antiSniper.totalDurationSecs,
+          startingFeeBps: o.fee.startingFeeBps,
+          endingFeeBps: o.fee.endingFeeBps,
+          numberOfPeriod: o.fee.numberOfPeriod,
+          totalDuration: o.fee.totalDurationSecs,
         },
       },
-      dynamicFeeEnabled: true,
-      collectFeeMode: CollectFeeMode.QuoteToken, // every fee in SOL
+      dynamicFeeEnabled: false,
+      collectFeeMode: CollectFeeMode.QuoteToken, // every fee in SOL (the game requires it)
       creatorTradingFeePercentage: 50,           // irrelevant: treasury is both partner and creator
       poolCreationFee: 0,
-      enableFirstSwapWithMinFee: false,          // keeps CPI swaps simple
+      enableFirstSwapWithMinFee: false,
     },
     migration: {
       migrationOption: MigrationOption.MET_DAMM_V2,
@@ -164,118 +172,64 @@ export type GameParams = {
   settleGraceSecs: BN;    // wait after zero before settling, for late-reported buys
 };
 
+/** keeper reports buys; team receives 20% of fees. */
+export type GameRoles = { keeper: PublicKey; team: PublicKey };
+
+async function initializeGame(connection: Connection, authority: Keypair, mint: PublicKey, pool: PublicKey, config: PublicKey, dammConfig: PublicKey, params: GameParams, roles: GameRoles) {
+  const a = gameAddresses(mint);
+  await fomocity(connection, authority).methods
+    .initialize(params, { keeper: roles.keeper, team: roles.team, dammConfig })
+    .accountsStrict({
+      authority: authority.publicKey, mint, quoteMint: NATIVE_MINT, game: a.game, treasury: a.treasury,
+      wsolVault: a.wsolVault, stash: a.stash, round: a.round(1), dbcPool: pool, dbcConfig: config,
+      tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
+    })
+    .rpc();
+  return a;
+}
+
 /**
- * Full launch: DBC config (fee claimer = treasury PDA) → pool → hand pool creator to the
- * treasury → initialize the game. The mint keypair is generated up front because every
- * game PDA, including the treasury, is derived from the mint address.
+ * Our own full launch: DBC config with the fee address as fee claimer → pool → hand the
+ * pool's creator rights to the fee address → initialize the game.
  */
 export async function launch(connection: Connection, authority: Keypair, opts: {
   launch?: Partial<LaunchOptions>;
   params: GameParams;
-  keeper: PublicKey;
-  maxBuybackLamports: BN;
-  buybackGapSecs: BN;
+  roles: GameRoles;
   mint?: Keypair;
 }) {
   const o = { ...DEFAULT_LAUNCH, ...opts.launch };
   const dbc = new DynamicBondingCurveClient(connection, 'confirmed');
   const mint = opts.mint ?? Keypair.generate();
   const config = Keypair.generate();
-  const a = gameAddresses(mint.publicKey);
 
-  const configTx = await dbc.partner.createConfig({
-    config: config.publicKey,
-    feeClaimer: a.treasury,
-    leftoverReceiver: authority.publicKey,
-    quoteMint: NATIVE_MINT,
-    payer: authority.publicKey,
-    ...launchCurve(o),
-  });
-  await send(connection, configTx, [authority, config]);
-
-  const poolTx = await dbc.creator.createPool({
-    name: o.name, symbol: o.symbol, uri: o.uri,
-    payer: authority.publicKey,
-    poolCreator: authority.publicKey,
-    config: config.publicKey,
-    baseMint: mint.publicKey,
-  });
-  await send(connection, poolTx, [authority, mint]);
+  await send(connection, await dbc.partner.createConfig({
+    config: config.publicKey, feeClaimer: feeAddress(), leftoverReceiver: authority.publicKey,
+    quoteMint: NATIVE_MINT, payer: authority.publicKey, ...launchCurve(o),
+  }), [authority, config]);
+  await send(connection, await dbc.creator.createPool({
+    name: o.name, symbol: o.symbol, uri: o.uri, payer: authority.publicKey,
+    poolCreator: authority.publicKey, config: config.publicKey, baseMint: mint.publicKey,
+  }), [authority, mint]);
   const pool = deriveDbcPoolAddress(NATIVE_MINT, mint.publicKey, config.publicKey);
+  await send(connection, await dbc.creator.transferPoolCreator({ pool, creator: authority.publicKey, newCreator: feeAddress() }), [authority]);
 
-  const transferTx = await dbc.creator.transferPoolCreator({ pool, creator: authority.publicKey, newCreator: a.treasury });
-  await send(connection, transferTx, [authority]);
-
-  const program = fomocity(connection, authority);
-  await program.methods
-    .initialize(opts.params, {
-      keeper: opts.keeper,
-      maxLamports: opts.maxBuybackLamports,
-      minGapSecs: opts.buybackGapSecs,
-      dammConfig: DAMM_V2_CONFIGS[o.migrationFeeOption],
-    })
-    .accountsStrict({
-      authority: authority.publicKey,
-      mint: mint.publicKey,
-      quoteMint: NATIVE_MINT,
-      game: a.game,
-      treasury: a.treasury,
-      vault: a.vault,
-      wsolVault: a.wsolVault,
-      stash: a.stash,
-      round: a.round(1),
-      dbcPool: pool,
-      dbcConfig: config.publicKey,
-      tokenProgram: TOKEN_PROGRAM_ID,
-      systemProgram: SystemProgram.programId,
-    })
-    .rpc();
-
+  const a = await initializeGame(connection, authority, mint.publicKey, pool, config.publicKey, DAMM_V2_CONFIGS[o.migrationFeeOption], opts.params, opts.roles);
   return { mint: mint.publicKey, config: config.publicKey, pool, ...a };
 }
 
 /**
- * Attach the game to a token someone else already launched on Meteora DBC (paired with
- * SOL, plain SPL token). The pool's fees don't go to the game; the jackpot is funded with
- * fundSol / fundJackpot instead.
+ * Attach the game to a token someone else launched on Meteora DBC (paired with SOL, fees in
+ * SOL, plain SPL token), whose fee claimer and/or creator is the game's fee address.
  */
-export async function attach(connection: Connection, authority: Keypair, opts: {
-  mint: PublicKey;
-  params: GameParams;
-  keeper: PublicKey;
-  maxBuybackLamports: BN;
-  buybackGapSecs: BN;
-}) {
+export async function attach(connection: Connection, authority: Keypair, opts: { mint: PublicKey; params: GameParams; roles: GameRoles }) {
   const info = await findLaunch(connection, opts.mint);
-  const a = gameAddresses(opts.mint);
-  const program = fomocity(connection, authority);
-  await program.methods
-    .initializeExternal(opts.params, {
-      keeper: opts.keeper,
-      maxLamports: opts.maxBuybackLamports,
-      minGapSecs: opts.buybackGapSecs,
-      dammConfig: info.dammConfig,
-    })
-    .accountsStrict({
-      authority: authority.publicKey,
-      mint: opts.mint,
-      quoteMint: NATIVE_MINT,
-      game: a.game,
-      treasury: a.treasury,
-      vault: a.vault,
-      wsolVault: a.wsolVault,
-      stash: a.stash,
-      round: a.round(1),
-      dbcPool: info.pool,
-      dbcConfig: info.config,
-      tokenProgram: TOKEN_PROGRAM_ID,
-      systemProgram: SystemProgram.programId,
-    })
-    .rpc();
+  if (!info.feesToGame) throw new Error(`the game's fee address ${feeAddress().toBase58()} is neither this pool's fee claimer nor its creator`);
+  const a = await initializeGame(connection, authority, opts.mint, info.pool, info.config, info.dammConfig, opts.params, opts.roles);
   return { mint: opts.mint, pool: info.pool, config: info.config, ...a };
 }
 
-/** Finds a token's Meteora DBC pool and checks the game can attach to it. */
+/** Finds a token's Meteora DBC pool and checks whether the game can attach to it. */
 export async function findLaunch(connection: Connection, mint: PublicKey) {
   const mintInfo = await connection.getAccountInfo(mint);
   if (!mintInfo) throw new Error(`no token at ${mint.toBase58()}`);
@@ -290,6 +244,9 @@ export async function findLaunch(connection: Connection, mint: PublicKey) {
   if (!config.quoteMint.equals(NATIVE_MINT)) throw new Error('pool is not paired with SOL');
   const dammConfig = DAMM_V2_CONFIGS[config.migrationFeeOption];
   if (!dammConfig) throw new Error(`unsupported migration fee option ${config.migrationFeeOption}`);
+  const fee = feeAddress();
+  const isFeeClaimer = config.feeClaimer.equals(fee);
+  const isCreator = found.account.poolState.creator.equals(fee);
   return {
     pool: found.publicKey,
     config: found.account.poolState.config,
@@ -297,30 +254,13 @@ export async function findLaunch(connection: Connection, mint: PublicKey) {
     migrated: found.account.poolState.isMigrated === 1,
     feeClaimer: config.feeClaimer,
     creator: found.account.poolState.creator,
+    feesInSol: config.collectFeeMode === 0,
+    creatorFeePercent: config.creatorTradingFeePercentage,
+    isFeeClaimer, isCreator, feesToGame: isFeeClaimer || isCreator,
   };
 }
 
-/** Anyone: send SOL to the game's buyback wallet (the keeper turns it into jackpot). */
-export async function fundSol(program: Program, funder: Keypair, g: GameState, lamports: BN) {
-  return program.methods.fundSol(lamports)
-    .accountsStrict({ funder: funder.publicKey, game: g.game, wsolVault: g.wsolVault, tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId })
-    .signers([funder])
-    .rpc();
-}
-
-/** Anyone: add FOMO from the funder's wallet straight to the jackpot. */
-export async function fundJackpot(program: Program, funder: Keypair, g: GameState, amount: BN) {
-  const id = BigInt(g.data.currentRound.toString());
-  return program.methods.fundJackpot(amount)
-    .accountsStrict({
-      funder: funder.publicKey, game: g.game, mint: g.mint, round: g.round(id),
-      funderTokenAccount: getAssociatedTokenAddressSync(g.mint, funder.publicKey), vault: g.vault, tokenProgram: TOKEN_PROGRAM_ID,
-    })
-    .signers([funder])
-    .rpc();
-}
-
-// ---------- keeper actions ----------
+// ---------- game actions ----------
 
 export type GameState = Awaited<ReturnType<typeof readGame>>;
 
@@ -330,9 +270,20 @@ export async function readGame(program: Program, mint: PublicKey) {
   return { ...a, mint, data: game };
 }
 
+const currentRound = (g: GameState) => g.round(BigInt(g.data.currentRound.toString()));
+
+/** Anyone: add SOL straight to the jackpot (100%, no team share). */
+export async function fundSol(program: Program, funder: Keypair, g: GameState, lamports: BN) {
+  return program.methods.fundSol(lamports)
+    .accountsStrict({ funder: funder.publicKey, game: g.game, round: currentRound(g), wsolVault: g.wsolVault, tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId })
+    .signers([funder])
+    .rpc();
+}
+
 function dbcAccounts(g: GameState, pool: { baseVault: PublicKey; quoteVault: PublicKey }) {
   return {
     game: g.game,
+    round: currentRound(g),
     treasury: g.treasury,
     wsolVault: g.wsolVault,
     stash: g.stash,
@@ -349,6 +300,7 @@ function dbcAccounts(g: GameState, pool: { baseVault: PublicKey; quoteVault: Pub
   };
 }
 
+/** Anyone: claim the fee address's DBC trading fees; 80% jackpot, 20% team. */
 export async function harvestDbc(program: Program, g: GameState) {
   const dbc = new DynamicBondingCurveClient(program.provider.connection, 'confirmed');
   const pool = await dbc.state.getPool(g.data.dbcPool);
@@ -364,161 +316,64 @@ export async function harvestDbcSurplus(program: Program, g: GameState) {
   return program.methods.harvestDbcSurplus().accountsStrict(rest).rpc();
 }
 
-/**
- * Quote off-chain, then swap `lamports` of harvested SOL on the bonding curve. Refuses
- * while the swap fee is above `maxFeeBps`, so the keeper doesn't buy back during the
- * anti-sniper window and hand 20% of a 50% fee to the protocol.
- */
-export async function buybackDbc(program: Program, keeper: Keypair, g: GameState, lamports: BN, slippageBps = 100, maxFeeBps = 200, sender?: Sender) {
-  const connection = program.provider.connection;
+/** SOL fees the fee address can claim right now on the DBC pool (lamports). */
+export async function claimableDbcFees(connection: Connection, g: GameState) {
   const dbc = new DynamicBondingCurveClient(connection, 'confirmed');
-  const pool = await dbc.state.getPool(g.data.dbcPool);
-  const config = await dbc.state.getPoolConfig(g.data.dbcConfig);
-  if (!pool || !config) throw new Error('DBC pool not found');
-  const quote = dbc.pool.swapQuote2({
-    virtualPool: pool, config, swapBaseForQuote: false, hasReferral: false,
-    eligibleForFirstSwapWithMinFee: false,
-    currentPoint: await getCurrentPoint(connection, config.activationType),
-    slippageBps, swapMode: SwapMode.ExactIn, amountIn: lamports,
-  });
-  const feeBps = quote.tradingFee.add(quote.protocolFee).add(quote.referralFee).muln(10_000).div(lamports).toNumber();
-  if (feeBps > maxFeeBps) throw new Error(`swap fee ${feeBps} bps is above ${maxFeeBps}; waiting for it to decay`);
-  const minOut = quote.minimumAmountOut!;
-  const builder = program.methods
-    .buybackDbc(lamports, minOut)
-    .accountsStrict({
-      keeper: keeper.publicKey,
-      round: g.round(BigInt(g.data.currentRound.toString())),
-      vault: g.vault,
-      ...dbcAccounts(g, pool.poolState),
-    })
-    .signers([keeper]);
-  const sig = sender ? await sender(await builder.transaction()) : await builder.rpc();
-  return { sig, minOut, expectedOut: quote.outputAmount };
+  const s = (await dbc.state.getPool(g.data.dbcPool))!.poolState;
+  const cfg = (await dbc.state.getPoolConfig(g.data.dbcConfig))!;
+  let owed = new BN(0);
+  if (cfg.feeClaimer.equals(g.treasury)) owed = owed.add(s.partnerQuoteFee);
+  if (s.creator.equals(g.treasury)) owed = owed.add(s.creatorQuoteFee);
+  return owed;
 }
 
-function dammAccounts(g: GameState, pool: { tokenAVault: PublicKey; tokenBVault: PublicKey }) {
-  return {
-    game: g.game,
-    treasury: g.treasury,
-    wsolVault: g.wsolVault,
-    stash: g.stash,
-    mint: g.mint,
-    quoteMint: NATIVE_MINT,
-    dammPool: g.data.dammPool,
-    tokenAVault: pool.tokenAVault,
-    tokenBVault: pool.tokenBVault,
-    poolAuthority: deriveDammV2PoolAuthority(),
-    eventAuthority: deriveDammV2EventAuthority(),
-    dammProgram: DAMM_PROGRAM_ID,
-    tokenProgram: TOKEN_PROGRAM_ID,
-  };
-}
-
-/** Claims fees on every DAMM v2 position the treasury holds in the game's pool. */
+/** Claims fees on every DAMM v2 position the fee address holds in the game's pool. */
 export async function harvestDamm(program: Program, g: GameState) {
   const cp = new CpAmm(program.provider.connection);
   const pool = await cp.fetchPoolState(g.data.dammPool);
   const positions = await cp.getUserPositionByPool(g.data.dammPool, g.treasury);
   const sigs = [];
   for (const p of positions) {
-    sigs.push(await program.methods.harvestDamm()
-      .accountsStrict({ ...dammAccounts(g, pool), position: p.position, positionNftAccount: p.positionNftAccount })
-      .rpc());
+    sigs.push(await program.methods.harvestDamm().accountsStrict({
+      game: g.game, round: currentRound(g), treasury: g.treasury, wsolVault: g.wsolVault, stash: g.stash,
+      mint: g.mint, quoteMint: NATIVE_MINT, dammPool: g.data.dammPool, position: p.position,
+      positionNftAccount: p.positionNftAccount, tokenAVault: pool.tokenAVault, tokenBVault: pool.tokenBVault,
+      poolAuthority: deriveDammV2PoolAuthority(), eventAuthority: deriveDammV2EventAuthority(),
+      dammProgram: DAMM_PROGRAM_ID, tokenProgram: TOKEN_PROGRAM_ID,
+    }).rpc());
   }
   return sigs;
 }
 
-export async function buybackDamm(program: Program, keeper: Keypair, g: GameState, lamports: BN, slippageBps = 100, sender?: Sender) {
-  const connection = program.provider.connection;
-  const cp = new CpAmm(connection);
-  const pool = await cp.fetchPoolState(g.data.dammPool);
-  const slot = await connection.getSlot();
-  const currentPoint = pool.activationType === 0 ? new BN(slot) : new BN((await connection.getBlockTime(slot))!);
-  const quote = cp.getQuote2({
-    inputTokenMint: NATIVE_MINT, slippage: slippageBps / 100, currentPoint, poolState: pool,
-    tokenADecimal: 6, tokenBDecimal: 9, hasReferral: false,
-    swapMode: DammSwapMode.ExactIn, amountIn: lamports,
-  });
-  const minOut = quote.minimumAmountOut!;
-  const builder = program.methods
-    .buybackDamm(lamports, minOut)
-    .accountsStrict({
-      keeper: keeper.publicKey,
-      round: g.round(BigInt(g.data.currentRound.toString())),
-      vault: g.vault,
-      ...dammAccounts(g, pool),
-    })
-    .signers([keeper]);
-  const sig = sender ? await sender(await builder.transaction()) : await builder.rpc();
-  return { sig, minOut, expectedOut: quote.outputAmount };
-}
-
-// ---------- private sending (Jito) ----------
-
-export type Sender = (tx: Transaction) => Promise<string>;
-
-/**
- * Sends a transaction through a Jito block engine instead of the public mempool, so
- * searchers can't see a buyback before it lands and sandwich it. Adds a tip transfer to
- * one of Jito's tip accounts (fetched from the block engine). NOT yet tested against a
- * live block engine; localnet has none.
- *   baseUrl e.g. https://mainnet.block-engine.jito.wtf
- */
-export function jitoSender(connection: Connection, payer: Keypair, baseUrl: string, tipLamports: number): Sender {
-  const rpc = async (path: string, method: string, params: unknown[]) => {
-    const res = await fetch(`${baseUrl.replace(/\/$/, '')}${path}`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-    });
-    const body: any = await res.json();
-    if (body.error) throw new Error(`jito ${method}: ${JSON.stringify(body.error)}`);
-    return body.result;
-  };
-  return async (tx) => {
-    const tips: string[] = await rpc('/api/v1/getTipAccounts', 'getTipAccounts', []);
-    const tipTo = new PublicKey(tips[Math.floor(Math.random() * tips.length)]);
-    tx.add(SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: tipTo, lamports: tipLamports }));
-    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
-    tx.recentBlockhash = blockhash;
-    tx.feePayer = payer.publicKey;
-    tx.sign(payer);
-    const sig: string = await rpc('/api/v1/transactions', 'sendTransaction', [tx.serialize().toString('base64'), { encoding: 'base64' }]);
-    const conf = await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
-    if (conf.value.err) throw new Error(`buyback failed: ${JSON.stringify(conf.value.err)}`);
-    return sig;
-  };
-}
-
 /**
  * Settles the current round once its countdown (plus grace) has run out. If it has a
- * winner, the jackpot is paid to their token account in the same transaction; the account
- * is created first if they closed it.
+ * winner, the jackpot is sent to their wallet as SOL in the same transaction.
  */
 export async function settle(program: Program, g: GameState, cranker: PublicKey) {
   const id = BigInt(g.data.currentRound.toString());
   const round: any = await (program.account as any).round.fetch(g.round(id));
-  const hasWinner = round.buyCount > 0;
-  const winnerAta = hasWinner ? getAssociatedTokenAddressSync(g.mint, round.lastBuyer, true) : null;
-  const builder = program.methods.settle().accountsStrict({
-    cranker, game: g.game, mint: g.mint, round: g.round(id), nextRound: g.round(id + 1n), vault: g.vault,
+  return program.methods.settle().accountsStrict({
+    cranker, game: g.game, round: g.round(id), nextRound: g.round(id + 1n), treasury: g.treasury,
+    wsolVault: g.wsolVault, quoteMint: NATIVE_MINT, payout: g.payout,
     // null = no winner: Anchor passes the optional account as absent.
-    winnerTokenAccount: winnerAta as any, tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
-  });
-  if (hasWinner) {
-    builder.preInstructions([
-      createAssociatedTokenAccountIdempotentInstruction(cranker, winnerAta!, round.lastBuyer, g.mint),
-    ]);
-  }
-  return builder.rpc();
+    winner: (round.buyCount > 0 ? round.lastBuyer : null) as any,
+    tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
+  }).rpc();
+}
+
+/** Anyone: send the team's accumulated 20% to the team wallet as SOL. */
+export async function withdrawTeam(program: Program, g: GameState, cranker: PublicKey) {
+  return program.methods.withdrawTeam().accountsStrict({
+    cranker, game: g.game, treasury: g.treasury, wsolVault: g.wsolVault, quoteMint: NATIVE_MINT,
+    payout: g.payout, team: g.data.cfg.team, tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
+  }).rpc();
 }
 
 /** Keeper: report one qualifying buy (from the tracker) to the program. */
 export async function recordBuy(program: Program, keeper: Keypair, g: GameState, t: { wallet: string; lamports: string; time: number | null; sig: string }) {
-  const id = BigInt(g.data.currentRound.toString());
   return program.methods
     .recordBuy(new PublicKey(t.wallet), new BN(t.lamports), new BN(t.time ?? 0), [...bs58.decode(t.sig)])
-    .accountsStrict({ keeper: keeper.publicKey, game: g.game, round: g.round(id) })
+    .accountsStrict({ keeper: keeper.publicKey, game: g.game, round: currentRound(g) })
     .signers([keeper])
     .rpc();
 }

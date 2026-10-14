@@ -52,41 +52,21 @@
         </ul>
       </section>
 
-      <section data-funding="creator" hidden>
+      <section>
         <h2>Where the jackpot comes from</h2>
-        <p>FOMO was launched by its creator on Meteora, and its trading fees go to the creator, not to the game. The jackpot is <b>funded by top-ups</b> from the creator and anyone else who wants a bigger prize:</p>
-        <ul>
-          <li><b>SOL</b> sent to the game is used by the keeper to buy FOMO, split like this:</li>
-        </ul>
+        <p>The jackpot is paid in <b>SOL</b> and funded automatically by <b>trading fees</b>. Every trade of the token, buy or sell, pays a fee on Meteora. The game's share of those fees is collected every few minutes and split:</p>
         <div class="split">
-          <div><big data-s="jackpot"></big><span>this round's jackpot</span></div>
-          <div><big data-s="nextRound"></big><span>next round's jackpot</span></div>
-          <div><big data-s="burn"></big><span>burned forever</span></div>
+          <div><big data-s="jackpot"></big><span>to the jackpot</span></div>
+          <div><big data-s="team"></big><span>to the team</span></div>
         </div>
-        <ul>
-          <li><b>FOMO</b> sent to the game goes straight into the current round's jackpot (or the next round's, if the clock already hit zero).</li>
-        </ul>
-        <p>Every top-up is recorded on-chain and shown in the live feed.</p>
+        <p>So the jackpot grows with trading, whether or not anyone is chasing the clock. Fees collected after the clock hits zero go to the next round, so they can never change who wins. Anyone can also add SOL straight to the jackpot.</p>
       </section>
 
-      <section data-funding="fees">
-        <h2>Where the jackpot comes from</h2>
-        <p>Every trade of FOMO, buy or sell, pays a fee on Meteora. The game's treasury collects <b>80% of all those fees</b> in SOL (Meteora keeps 20%). A keeper regularly uses that SOL to buy FOMO back, and splits what it buys:</p>
-        <div class="split">
-          <div><big data-s="jackpot"></big><span>this round's jackpot</span></div>
-          <div><big data-s="nextRound"></big><span>next round's jackpot</span></div>
-          <div><big data-s="burn"></big><span>burned forever</span></div>
-        </div>
-        <p>So the jackpot grows with trading, whether or not anyone is playing a round. Buybacks wait until the swap fee is low, and a buyback that lands after the clock hit zero goes to the next round, so it can never change who wins.</p>
-      </section>
-
-      <section data-funding="fees">
+      <section>
         <h2>The token</h2>
         <ul>
-          <li><b>Launch on a bonding curve.</b> FOMO launches on Meteora's Dynamic Bonding Curve. The price starts low and rises automatically as people buy.</li>
-          <li><b>Snipers pay the pot.</b> The trading fee starts at 50% and falls to 1% over the first two minutes. Bots that rush the launch pay heavy fees, and those fees feed the jackpot.</li>
-          <li><b>Graduation.</b> When the curve has raised its target, FOMO moves to a regular Meteora pool. All of its liquidity is <b>locked forever</b>: nobody, including the team, can pull it. The game keeps earning that pool's fees for the jackpot.</li>
-          <li><b>No team allocation.</b> No presale, no team tokens, no vesting. Nobody can mint more FOMO.</li>
+          <li>The token launched on Meteora, first on a bonding curve where the price rises as people buy, then in a regular Meteora pool once the curve fills.</li>
+          <li>Its trading fees are routed to the game's fee address, which the game program controls. That's what funds the jackpot.</li>
         </ul>
       </section>
 
@@ -95,13 +75,13 @@
         <p>The game runs as an open-source Solana program. Everything below is public on-chain:</p>
         <ul>
           <li>Every counted buy is recorded with the wallet, the SOL amount, the time and <b>the swap's transaction signature</b>, so anyone can match it to the real trade.</li>
-          <li>The countdown, the last buyer, the jackpot and every payout live in the program's accounts.</li>
-          <li>The jackpot can only be paid to the round's last recorded buyer, and only once.</li>
+          <li>The countdown, the last buyer, the jackpot, every fee collected, every payout and the team's share live in the program's accounts.</li>
+          <li>The jackpot can only be paid to the round's last recorded buyer, and only once. The team's share can only go to the team wallet set in the program.</li>
         </ul>
         <p>There are trust points, and you should know them:</p>
         <ul>
           <li><b>The keeper reports buys.</b> The program can't see trades made in other apps, so the game's keeper watches Meteora and reports each qualifying buy. It could miss or delay one. Every report is public, so a missing buy is visible to anyone who checks.</li>
-          <li><b>Meteora can pause the pool</b> after graduation. That would stop buybacks until it resumes; it can't touch the jackpot or the locked liquidity.</li>
+          <li><b>Meteora can pause the pool</b> after graduation. That would stop trading and fees until it resumes; it can't touch the jackpot.</li>
           <li><b>Program upgrades.</b> Until the program's upgrade authority is revoked, the team could change the program. The goal is to revoke it after launch, and that will be announced and checkable on-chain.</li>
         </ul>
       </section>

@@ -1,120 +1,82 @@
 # FOMO City launch settings
 
-Every setting the mainnet launch uses: what Meteora's Dynamic Bonding Curve (DBC) is
-configured with, what the game is configured with, and which ones are yours to change.
-Defaults live in `scripts/lib.ts` (`DEFAULT_LAUNCH`, `launchCurve`) and `scripts/launch.ts`.
-Run `npm run launch` without `CONFIRM_MAINNET=yes` to print the exact plan before sending.
+How the game is set up on mainnet: what the token's launch on Meteora must look like, the
+game's settings, and the keeper. The game attaches to the token after it launches.
 
-## Meteora DBC config: your choices
+## How the money flows
 
-| Setting | Default | Env / where | Notes |
-| - | - | - | - |
-| Token name | FOMO City | `TOKEN_NAME` | |
-| Symbol | FOMO | `TOKEN_SYMBOL` | |
-| Metadata URI | **placeholder** | `TOKEN_URI` | Must be a real JSON (name, symbol, image, description) before launch. |
-| Total supply | 1,000,000,000 | `DEFAULT_LAUNCH.totalSupply` | 6 decimals. |
-| Migration threshold | 85 SOL | `MIGRATION_SOL` | SOL raised on the curve before it graduates. 10 SOL is the only value Meteora's own bots are documented to auto-migrate; any other value, our keeper migrates (permissionless). |
-| Supply into the locked pool at migration | 20% | `DEFAULT_LAUNCH.percentageSupplyOnMigration` | The rest is sold along the curve. |
-| Anti-sniper fee | 50% → 1% over 120 s, exponential, 60 steps | `DEFAULT_LAUNCH.antiSniper` | Snipers' fees go to the treasury and on into the pot. |
-| Migrated pool fee | 1% (`FixedBps100`) | `DEFAULT_LAUNCH.migrationFeeOption` | DAMM v2 config `Hv8Lmzmnju6m7kcokVKvwqz7QPmdX9XfKjJsXz8RXcjp`. |
+- Every trade of the token pays a trading fee on Meteora (Meteora keeps 20% of it).
+- The game's **fee address** receives the fee share it's entitled to, in SOL.
+- The keeper claims those fees every few minutes and the program splits them:
+  **80% to the jackpot, 20% to the team**.
+- When a round's clock hits zero, the program pays the whole jackpot **in SOL** to the last
+  buyer. The team's share is sent to the team wallet in SOL once it reaches 0.1 SOL.
 
-What the defaults produce (computed from the curve):
+## The game's fee address
 
-| | 85 SOL threshold (default) | 10 SOL threshold |
+```
+Ch5rw4HTdEPoJQUR9Z3seSkG4YgmTQ5fo4JtZDigvKjD
+```
+
+Print it any time with `cd scripts && npm run fee-address`. It's controlled by the game program
+(no private key exists for it) and depends only on the program ID, so it's the same before and
+after the token exists.
+
+## What the launcher must set on Meteora (DBC)
+
+| Setting | Must be | Why |
 | - | - | - |
-| Start price | 2.66e-8 SOL per FOMO | 3.13e-9 SOL per FOMO |
-| Start market cap | ≈ 26.6 SOL | ≈ 3.1 SOL |
-| Price at graduation | 4.25e-7 SOL per FOMO | 5.0e-8 SOL per FOMO |
-| Market cap at graduation | ≈ 425 SOL | ≈ 50 SOL |
-| Price increase along the curve | 16× | 16× |
+| Token type | **SPL Token** (not Token-2022) | The game rejects Token-2022 mints. |
+| Quote token | **SOL** | The jackpot is paid in SOL. |
+| Collect fee mode | **Quote token (SOL)** | Fees must arrive in SOL; the game refuses otherwise. |
+| Trading fee | **Flat 3%** (start = end, no decay) | Agreed: no sniper tax. |
+| Fees to the game | One of the two ways below | Otherwise the game refuses to attach. |
 
-## Meteora DBC config: fixed by the design (don't change)
+**Routing the fees to the game, either:**
 
-The program's `initialize` checks several of these and refuses a pool that doesn't match.
+1. **Fee claimer field** (if the launch tool has one, like Meteora's own): set it to the fee
+   address above, and set the **creator trading fee to 0%** so the whole non-Meteora share goes
+   to the game. If the creator share is above 0%, that part stays with the launcher.
+2. **Creator transfer** (if the tool keeps the fee claimer for itself): right after launch, the
+   launcher transfers the pool's creator rights to the fee address (one transaction). The game
+   then gets the creator share of fees; the platform keeps its partner share.
 
-| Setting | Value | Why |
+Optional but recommended: lock the migrated liquidity, and give the creator's LP share to the
+fee address before graduation (option 2 does this automatically), so fees keep funding the
+jackpot after the token moves to the regular pool.
+
+## Game settings (set when attaching)
+
+| Setting | Default | Env |
 | - | - | - |
-| Quote token | SOL (wrapped) | Checked on-chain. Buybacks swap SOL. |
-| Token type | Plain SPL, immutable, no mint authority | The game rejects Token-2022 mints. No one can mint more. |
-| Fee claimer | Game treasury PDA | Checked on-chain. Gets the partner share of fees. |
-| Pool creator | Game treasury PDA (handed over right after pool creation) | Checked on-chain. Gets the creator share. Together: 80% of all trading fees (Meteora keeps 20%). |
-| Fee collection | In SOL only (`QuoteToken`) | Checked on-chain. |
-| Dynamic fee | On | Extra fee in volatile moments, also to the treasury. |
-| First-swap-at-min-fee | Off | Lets our program swap through CPI. |
-| Pool creation fee | 0 | |
-| Migration fee | 0% | |
-| Migration target | DAMM v2 | Required by Meteora for new launches. |
-| Migrated liquidity | 100% permanently locked (50% partner + 50% creator), both position NFTs owned by the treasury | Nobody can pull liquidity; LP fees keep funding the pot forever. |
-| Team allocation / vesting | None | No presale, no team tokens. |
-| Activation | By timestamp, immediately | |
+| Minimum buy that counts | 0.05 SOL | `MIN_BUY_SOL` |
+| Seconds added per buy | 30 | `SECS_PER_BUY` |
+| Round timer | 30 min | `MAX_TIMER_SECS` (rounds start at 30:00 and never show more) |
+| Settle grace | 60 s | `SETTLE_GRACE_SECS` |
+| Keeper key | (required) | `KEEPER_PUBKEY`; changeable later with `set_keeper` |
+| Team wallet | (required) | `TEAM_WALLET`; changeable later with `set_team` |
 
-## Game config: your choices
-
-| Setting | Default | Env | Notes |
-| - | - | - | - |
-| Minimum buy that counts | 0.05 SOL | `MIN_BUY_SOL` | SOL into the pool. Smaller buys and all sells are ignored. |
-| Seconds added per buy | 30 | `SECS_PER_BUY` | |
-| Round timer | 30 min | `MAX_TIMER_SECS` | Each round starts at 30:00 and the countdown never shows more than 30:00. A round ends after a stretch with no counted buys: 30 min if quiet, longer while people keep buying. |
-| Settle grace | 60 s | `SETTLE_GRACE_SECS` | Wait after zero before the round can close, so buys made just before zero are still recorded. |
-| Keeper key | (required) | `KEEPER_PUBKEY` | Only key allowed to report buys and buy back. Changeable later via `set_keeper`. |
-| Max SOL per buyback | 1 SOL | `MAX_BUYBACK_SOL` | Suggest 0.1 for the first hours, then raise via `set_buyback_limits`. |
-| Min gap between buybacks | 300 s | `BUYBACK_GAP_SECS` | |
-
-## Game config: fixed in the program
-
-| Rule | Value |
-| - | - |
-| Winner | Last counted buyer when the countdown hits 0; paid automatically at settle |
-| Buyback split | 70% current jackpot · 20% next round · 10% burned |
-| Buyback after the timer hits 0 | Goes to the next round |
-| Round with no buyers | Jackpot carries over |
+These are fixed in the program: 80% jackpot / 20% team; fees after zero go to the next round;
+a round with no buys carries its jackpot over.
 
 ## Keeper settings
 
 | Setting | Default | Env |
 | - | - | - |
-| RPC | (required, use a paid one) | `RPC_URL` |
+| RPC | Helius from `scripts/.env` | `HELIUS_API_KEY` or `RPC_URL` |
 | Loop interval | 20 s | `INTERVAL_SECS` |
-| Skip buybacks while the swap fee is above | 2% | `MAX_FEE_BPS` |
-| Smallest buyback | 0.01 SOL | `MIN_BUYBACK_LAMPORTS` |
-| Slippage on buybacks | 1% | `SLIPPAGE_BPS` |
-| Private sending | off | `JITO_URL`, `JITO_TIP_LAMPORTS` (default 0.0001 SOL) |
+| Smallest fee claim | 0.01 SOL | `MIN_HARVEST_SOL` |
+| Team payout threshold | 0.1 SOL | `TEAM_MIN_SOL` |
+| Low-balance warning | 0.2 SOL | `LOW_BALANCE_SOL` |
 
-## Attach mode: a token someone else launched
-
-Use this when the token is launched on Meteora by someone else (for example on
-launch.meteora.ag) instead of with `npm run launch`. The game attaches to it by CA.
-
-**What the launcher must choose on Meteora (DBC):**
-
-| Setting | Must be |
-| - | - |
-| Token type | **SPL Token** (not Token-2022: the game rejects Token-2022 mints) |
-| Quote token | **SOL** |
-| Everything else | Their choice (fees, curve, graduation threshold). Fees stay with them. |
-
-**Then the operator (you):**
-
-1. Deploy the program (README "Mainnet launch", deploy step).
-2. Dry run, check the plan, then attach for real:
-   ```bash
-   cd scripts && KEEPER_PUBKEY=<keeper> MINT=<token CA> npm run attach
-   cd scripts && KEEPER_PUBKEY=<keeper> MINT=<token CA> CONFIRM_MAINNET=yes npm run attach
-   ```
-   Same round settings as launch: `MIN_BUY_SOL`, `SECS_PER_BUY`, `MAX_TIMER_SECS`, `SETTLE_GRACE_SECS`,
-   `MAX_BUYBACK_SOL`, `BUYBACK_GAP_SECS`. Buys only count from the moment of attaching.
-3. Start the keeper with `MINT=<token CA>`. It skips fee harvesting in this mode.
-4. In Vercel also set `VITE_JACKPOT_FUNDING=creator`, so the guide page explains the funding
-   correctly. The game screen and rules pop-up switch automatically.
-
-**Funding the jackpot** (anyone can do it; the creator can send their trading fees):
+## Commands
 
 ```bash
-cd scripts && FUNDER=<wallet.json> MINT=<token CA> FUND_SOL=1 npm run fund
-cd scripts && FUNDER=<wallet.json> MINT=<token CA> FUND_TOKENS=5000000 npm run fund
+cd scripts && npm run fee-address                                             # the address for the launcher
+cd scripts && KEEPER_PUBKEY=<keeper> TEAM_WALLET=<team> MINT=<CA> npm run attach    # plan only
+cd scripts && KEEPER_PUBKEY=<keeper> TEAM_WALLET=<team> MINT=<CA> CONFIRM_MAINNET=yes npm run attach
+cd scripts && KEEPER=~/.config/solana/fomocity-keeper.json MINT=<CA> npm run keeper
+cd scripts && FUNDER=<wallet.json> MINT=<CA> FUND_SOL=1 npm run fund          # optional top-up, 100% to the jackpot
 ```
 
-SOL goes to the game's buyback wallet; the keeper turns it into FOMO (70% jackpot · 20% next
-round · 10% burned), once the token's swap fee is below `MAX_FEE_BPS`. FOMO goes straight into
-the current round's jackpot. Both show up in the site's live feed. On mainnet both commands
-need `CONFIRM_MAINNET=yes`.
+`npm run launch` does our own launch instead (flat 3%, fee address as fee claimer and creator).

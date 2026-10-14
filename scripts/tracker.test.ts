@@ -1,12 +1,12 @@
 // Tracker on a local validator (./localnet.sh): real Meteora DBC buys and sells from two
-// wallets plus a game buyback; checks the tracker attributes each one to the right wallet
+// wallets; checks the tracker attributes each one to the right wallet
 // with the exact SOL that entered or left the pool, both from history and live.
 import assert from 'node:assert/strict';
 import { DynamicBondingCurveClient, SwapMode } from '@meteora-ag/dynamic-bonding-curve-sdk';
 import { getAccount, getAssociatedTokenAddressSync } from '@solana/spl-token';
 import { Connection, Keypair, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import BN from 'bn.js';
-import { buybackDbc, fomocity, harvestDbc, launch, readGame, send } from './lib.ts';
+import { launch, send } from './lib.ts';
 import { track, type Trade } from './tracker.ts';
 
 const connection = new Connection('http://127.0.0.1:8899', 'confirmed');
@@ -22,9 +22,9 @@ async function funded(n: number) {
 async function main() {
   const [authority, keeper, alice, bob] = await Promise.all([funded(30), funded(5), funded(10), funded(10)]);
   const g0 = await launch(connection, authority, {
-    launch: { migrationQuoteThresholdSol: 50, antiSniper: { startingFeeBps: 1_000, endingFeeBps: 100, numberOfPeriod: 2, totalDurationSecs: 2 } },
+    launch: { migrationQuoteThresholdSol: 50 },
     params: { minBuyLamports: new BN(50_000_000), timeAddPerBuy: new BN(30), maxTimer: new BN(1800), initialTimer: new BN(1800), settleGraceSecs: new BN(60) },
-    keeper: keeper.publicKey, maxBuybackLamports: new BN(LAMPORTS_PER_SOL), buybackGapSecs: new BN(0),
+    roles: { keeper: keeper.publicKey, team: Keypair.generate().publicKey },
   });
   await sleep(3_000);
 
@@ -48,17 +48,6 @@ async function main() {
   await swap(alice, false, new BN(0.5 * LAMPORTS_PER_SOL));
   await swap(bob, false, new BN(0.2 * LAMPORTS_PER_SOL));
   await swap(alice, true, (await fomoOf(alice)).divn(2));
-
-  console.log('▸ game buyback (must be flagged as the game, not a player)');
-  const program = fomocity(connection, authority);
-  let g = await readGame(program, g0.mint);
-  await harvestDbc(program, g);
-  g = await readGame(program, g0.mint);
-  const wsol = new BN((await getAccount(connection, g.wsolVault)).amount.toString());
-  const before = await vaultBal();
-  await buybackDbc(program, keeper, g, wsol);
-  // The bought FOMO ends up in the game's vault (90%; 10% is burned), so the game account is the receiver.
-  expected.push({ side: 'buy', wallet: g.game.toBase58(), lamports: ((await vaultBal()) - before).toString(), game: true });
 
   console.log('▸ backfill from history');
   const got: Trade[] = [];
