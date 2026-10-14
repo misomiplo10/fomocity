@@ -26,7 +26,11 @@ const u64le = (n) => { const b = Buffer.alloc(8); b.writeBigUInt64LE(BigInt(n));
 const num = (bn) => Number(bn.toString());
 
 export async function createChain(cfg) {
-  const connection = new Connection(cfg.rpcUrl, 'confirmed');
+  // VITE_RPC_URL=/api/rpc goes through the site's own relay (api/rpc.js), which keeps the
+  // Helius key private. The relay is plain HTTP, so live log streaming is off and the
+  // regular polling below carries everything.
+  const relayed = cfg.rpcUrl.startsWith('/');
+  const connection = new Connection(relayed ? new URL(cfg.rpcUrl, location.origin).href : cfg.rpcUrl, 'confirmed');
   const mint = new PublicKey(cfg.mint);
   const game = pda([Buffer.from('game'), mint.toBuffer()]);
   const roundKey = (id) => pda([Buffer.from('round'), game.toBuffer(), u64le(id)]);
@@ -168,6 +172,12 @@ export async function createChain(cfg) {
     const wsol = await connection.getTokenAccountBalance(wsolVault).catch(() => null);
     market.wsolSol = wsol ? Number(wsol.value.amount) / LAMPORTS_PER_SOL : 0;
     const s = gameData.stats;
+    if (relayed && market.boughtTokens && num(s.boughtTokens) > market.boughtTokens) {
+      const out = num(s.boughtTokens) - market.boughtTokens;
+      const burn = num(s.burnedTokens) - market.burnedTokens;
+      const toNext = Math.floor(out * 0.2);
+      emit({ type: 'buyback', sol: (num(s.spentLamports) / LAMPORTS_PER_SOL) - market.spentSol, out, toJackpot: out - toNext - burn, toNext, burn });
+    }
     market.harvestedSol = num(s.harvestedLamports) / LAMPORTS_PER_SOL;
     market.spentSol = num(s.spentLamports) / LAMPORTS_PER_SOL;
     market.boughtTokens = num(s.boughtTokens);
@@ -179,7 +189,7 @@ export async function createChain(cfg) {
   // ---------- live events ----------
 
   const parser = new EventParser(PROGRAM_ID, new BorshCoder(IDL));
-  connection.onLogs(PROGRAM_ID, ({ logs, err }) => {
+  if (!relayed) connection.onLogs(PROGRAM_ID, ({ logs, err }) => {
     if (err) return;
     for (const ev of parser.parseLogs(logs)) {
       // Anchor 1.x IDLs keep snake_case field names; accept camelCase too. Event names may

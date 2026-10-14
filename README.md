@@ -108,10 +108,11 @@ cd scripts && npm install
 ### Mainnet launch
 
 **Helius setup.** Copy `scripts/.env.example` to `scripts/.env` (gitignored) and set
-`HELIUS_API_KEY`. Launch, keeper and tracker then use `https://mainnet.helius-rpc.com/?api-key=…`
-and its websocket; logs mask the key. For the website, create a **separate Helius key
-restricted to your domain** in the Helius dashboard and set it as `VITE_RPC_URL` in Vercel,
-because anything in the site's JavaScript is public.
+`HELIUS_API_KEY`; launch, attach, keeper and tracker use it, and logs mask the key. The website
+never sees a Helius key: it calls its own relay, `api/rpc.js` (a Vercel function), which forwards
+only read-only RPC methods to Helius. In Vercel set `HELIUS_RPC_URL` (secret, a separate
+`fomocity-website` key) and `VITE_RPC_URL=/api/rpc`. Through the relay the site polls instead of
+using websockets.
 
 All settings, defaults and what's fixed by design are in [LAUNCH.md](LAUNCH.md).
 
