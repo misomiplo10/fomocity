@@ -9,7 +9,7 @@
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import { deriveDammV2PoolAuthority, deriveDbcPoolAuthority } from '@meteora-ag/dynamic-bonding-curve-sdk';
 import { NATIVE_MINT } from '@solana/spl-token';
-import { Connection, Keypair, PublicKey, type VersionedTransactionResponse } from '@solana/web3.js';
+import { Connection, Keypair, PublicKey } from '@solana/web3.js';
 import { fomocity, gameAddresses, readGame, redactUrl, rpcUrl } from './lib.ts';
 
 export type Trade = {
@@ -24,28 +24,53 @@ export type Trade = {
   game: boolean;           // true for the game's own buybacks (never a player)
 };
 
+type TokenBalance = { accountIndex: number; mint: string; owner?: string; uiTokenAmount: { amount: string } };
+/** A confirmed transaction as the RPC returns it with `encoding: 'json'`. */
+export type RawTx = {
+  slot: number;
+  blockTime: number | null;
+  transaction: { signatures: string[]; message: { accountKeys: string[] } };
+  meta: {
+    err: unknown;
+    preTokenBalances?: TokenBalance[] | null;
+    postTokenBalances?: TokenBalance[] | null;
+    loadedAddresses?: { writable: string[]; readonly: string[] } | null;
+  } | null;
+};
+
+/**
+ * Fetches a transaction straight from the RPC. web3.js 1.x can't decode version 1
+ * transactions, which wallets and Jupiter now send, so this skips its decoder: the tracker
+ * only needs the account list and token balances, which the RPC returns as plain JSON.
+ */
+export async function fetchTx(connection: Connection, sig: string): Promise<RawTx | null> {
+  const res = await (connection as any)._rpcRequest('getTransaction', [sig, { encoding: 'json', commitment: 'confirmed', maxSupportedTransactionVersion: 1 }]);
+  if (res.error) throw new Error(res.error.message);
+  return res.result ?? null;
+}
+
 /**
  * Extracts FOMO trades on one of our pools from a confirmed transaction, using token
  * balance changes, so it works for swaps sent directly or routed through Jupiter etc.
  * `quoteVault` is the pool's WSOL vault; its change is the exact SOL in/out of that pool.
  */
 export function parseTrades(
-  tx: VersionedTransactionResponse,
+  tx: RawTx,
   opts: { mint: PublicKey; quoteVault: PublicKey; venue: Trade['venue']; gameOwners: Set<string> },
 ): Trade[] {
   const meta = tx.meta;
   if (!meta || meta.err) return [];
-  const keys = tx.transaction.message.getAccountKeys({ accountKeysFromLookups: meta.loadedAddresses ?? undefined });
   const mint = opts.mint.toBase58();
   const poolAuthorities = new Set([deriveDbcPoolAuthority().toBase58(), deriveDammV2PoolAuthority().toBase58()]);
 
   // Quote vault delta = SOL into (+) or out of (−) this pool in this transaction.
   let vaultDelta = 0n;
   const wsol = NATIVE_MINT.toBase58();
-  const amountAt = (list: typeof meta.preTokenBalances, idx: number, m: string) =>
+  const amountAt = (list: TokenBalance[] | null | undefined, idx: number, m: string) =>
     BigInt(list?.find((b) => b.accountIndex === idx && b.mint === m)?.uiTokenAmount.amount ?? '0');
-  const vaultIdx = keys.staticAccountKeys.concat(keys.accountKeysFromLookups?.writable ?? [], keys.accountKeysFromLookups?.readonly ?? [])
-    .findIndex((k) => k.equals(opts.quoteVault));
+  // Account order: static keys, then lookup-table writable, then readonly.
+  const keys = [...tx.transaction.message.accountKeys, ...(meta.loadedAddresses?.writable ?? []), ...(meta.loadedAddresses?.readonly ?? [])];
+  const vaultIdx = keys.indexOf(opts.quoteVault.toBase58());
   if (vaultIdx < 0) return [];
   vaultDelta = amountAt(meta.postTokenBalances, vaultIdx, wsol) - amountAt(meta.preTokenBalances, vaultIdx, wsol);
   if (vaultDelta === 0n) return [];
@@ -108,7 +133,7 @@ export async function track(connection: Connection, mint: PublicKey, onTrade: (t
   const handle = (sig: string, v: Venue) => {
     chain = chain.then(async () => {
       if (seen.has(sig)) return;
-      const tx = await connection.getTransaction(sig, { commitment: 'confirmed', maxSupportedTransactionVersion: 0 });
+      const tx = await fetchTx(connection, sig);
       if (!tx) return;
       seen.add(sig);
       for (const t of parseTrades(tx, { mint, quoteVault: v.quoteVault, venue: v.venue, gameOwners })) onTrade(t);

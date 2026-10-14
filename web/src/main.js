@@ -10,12 +10,36 @@ import { createUI } from './ui.js';
 import './style.css';
 
 const params = new URLSearchParams(location.search);
-const renderer = new THREE.WebGPURenderer({ antialias: true, forceWebGL: params.has('webgl') });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-renderer.setSize(innerWidth, innerHeight);
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
+
+// If anything below fails, say so instead of leaving a black page.
+const fail = (e) => {
+  console.error('[fomocity]', e);
+  if (document.getElementById('hud')) return; // the game is already up
+  document.getElementById('app').innerHTML =
+    '<p style="color:#cdd3ff;font:16px/1.5 system-ui;text-align:center;margin-top:40vh;padding:0 16px">' +
+    'FOMO City could not start in this browser. Try the latest Chrome, Edge or Brave, or ' +
+    '<a style="color:#7cf" href="?webgl">open the simple version</a>.</p>';
+};
+addEventListener('error', (e) => fail(e.error ?? e.message));
+addEventListener('unhandledrejection', (e) => fail(e.reason));
+
+// WebGPU where it works, WebGL2 otherwise (some browsers expose WebGPU but fail to start it).
+async function makeRenderer(forceWebGL) {
+  const r = new THREE.WebGPURenderer({ antialias: true, forceWebGL });
+  r.setPixelRatio(Math.min(devicePixelRatio, 2));
+  r.setSize(innerWidth, innerHeight);
+  r.toneMapping = THREE.ACESFilmicToneMapping;
+  await r.init();
+  return r;
+}
+let renderer;
+try {
+  renderer = await makeRenderer(params.has('webgl'));
+} catch (e) {
+  console.warn('[fomocity] WebGPU failed, using WebGL2', e);
+  renderer = await makeRenderer(true);
+}
 document.getElementById('app').appendChild(renderer.domElement);
-await renderer.init();
 
 const scene = new THREE.Scene();
 const sky = new THREE.Color(0x05060f);
