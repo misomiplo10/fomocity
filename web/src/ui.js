@@ -1,3 +1,4 @@
+import { STATUS } from './status.js';
 // HUD: watch-only. Playing happens by buying the token anywhere (Jupiter, Meteora, any
 // wallet); the site shows the countdown, the last buyer, live buys, the jackpot, the
 // Meteora flywheel and recent winners. There is no buy button and no wallet connection.
@@ -39,6 +40,7 @@ export function createUI({ backend, camera, plaza }) {
       <div id="timer">--:--</div>
       <div class="pot">JACKPOT <span id="jackpot"></span></div>
       <div class="sub">last buyer <b id="last">—</b> · <span id="buys">0</span> buys</div>
+      ${STATUS.phase === 'final' ? '<div class="final">FINAL ROUND · the game ends when this clock hits zero. There will be no next round.</div>' : ''}
     </div>
     <div id="feed" class="panel"><h3>Live buys</h3><ul id="feedlist"></ul></div>
     <div id="market" class="panel">

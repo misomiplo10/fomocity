@@ -7,7 +7,20 @@ import { Plaza } from './towers.js';
 import { createSim } from './sim.js';
 import { chainConfig } from './config.js';
 import { createUI } from './ui.js';
+import { STATUS } from './status.js';
 import './style.css';
+
+// The game is over: show the result and nothing else (the program no longer exists).
+if (STATUS.phase === 'ended') {
+  const sol = STATUS.prizeSol != null ? `${STATUS.prizeSol.toFixed(3)} SOL` : 'the jackpot';
+  const who = STATUS.winner ? `<a style="color:#7cf" href="https://solscan.io/account/${STATUS.winner}" target="_blank" rel="noopener">${STATUS.winner.slice(0, 4)}…${STATUS.winner.slice(-4)}</a>` : 'nobody';
+  const tx = STATUS.sig ? ` (<a style="color:#7cf" href="https://solscan.io/tx/${STATUS.sig}" target="_blank" rel="noopener">payout</a>)` : '';
+  document.getElementById('app').innerHTML =
+    '<div style="color:#cdd3ff;font:16px/1.6 system-ui;text-align:center;margin-top:35vh;padding:0 16px">' +
+    '<h1 style="font-size:28px;margin:0 0 8px;color:#fff">FOMO City has ended</h1>' +
+    `<p style="margin:0">The final round was won by ${who}, who was paid ${sol}${tx}.<br>Thanks to everyone who played. No new rounds will start.</p></div>`;
+  await new Promise(() => {}); // stop here: don't start the 3D city or the game
+}
 
 const params = new URLSearchParams(location.search);
 
