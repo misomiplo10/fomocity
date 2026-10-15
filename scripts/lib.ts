@@ -16,6 +16,7 @@ import {
 import {
   ComputeBudgetProgram, Connection, Keypair, PublicKey, SystemProgram, Transaction,
   sendAndConfirmTransaction, type Signer,
+  LAMPORTS_PER_SOL,
 } from '@solana/web3.js';
 import BN from 'bn.js';
 
@@ -197,6 +198,10 @@ export async function launch(connection: Connection, authority: Keypair, opts: {
   params: GameParams;
   roles: GameRoles;
   mint?: Keypair;
+  /** Optional dev buy by the launching wallet, in the same transaction that creates the pool
+   *  (so it's the token's very first trade). It comes before the game exists, so it doesn't
+   *  count as a game buy. */
+  firstBuySol?: number;
 }) {
   const o = { ...DEFAULT_LAUNCH, ...opts.launch };
   const dbc = new DynamicBondingCurveClient(connection, 'confirmed');
@@ -207,10 +212,17 @@ export async function launch(connection: Connection, authority: Keypair, opts: {
     config: config.publicKey, feeClaimer: feeAddress(), leftoverReceiver: authority.publicKey,
     quoteMint: NATIVE_MINT, payer: authority.publicKey, ...launchCurve(o),
   }), [authority, config]);
-  await send(connection, await dbc.creator.createPool({
+  const createPoolParam = {
     name: o.name, symbol: o.symbol, uri: o.uri, payer: authority.publicKey,
     poolCreator: authority.publicKey, config: config.publicKey, baseMint: mint.publicKey,
-  }), [authority, mint]);
+  };
+  const firstBuy = opts.firstBuySol ? new BN(Math.round(opts.firstBuySol * LAMPORTS_PER_SOL)) : null;
+  await send(connection, firstBuy
+    ? await dbc.creator.createPoolWithFirstBuy({
+      createPoolParam,
+      firstBuyParam: { buyer: authority.publicKey, receiver: authority.publicKey, buyAmount: firstBuy, minimumAmountOut: new BN(0), referralTokenAccount: null },
+    })
+    : await dbc.creator.createPool(createPoolParam), [authority, mint]);
   const pool = deriveDbcPoolAddress(NATIVE_MINT, mint.publicKey, config.publicKey);
   await send(connection, await dbc.creator.transferPoolCreator({ pool, creator: authority.publicKey, newCreator: feeAddress() }), [authority]);
 

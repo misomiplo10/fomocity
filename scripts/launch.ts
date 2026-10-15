@@ -31,6 +31,7 @@ const secsPerBuy = Number(env('SECS_PER_BUY', '30'));
 const maxTimer = Number(env('MAX_TIMER_SECS', '1800'));
 const graceSecs = Number(env('SETTLE_GRACE_SECS', '60'));
 
+const firstBuySol = Number(env('FIRST_BUY_SOL', '0'));
 const keeperKey = new PublicKey(env('KEEPER_PUBKEY'));
 const teamKey = new PublicKey(env('TEAM_WALLET'));
 const plan = {
@@ -39,6 +40,7 @@ const plan = {
   authority: authority.publicKey.toBase58(),
   authoritySol: (await connection.getBalance(authority.publicKey)) / LAMPORTS_PER_SOL,
   token: `${launchOpts.name} (${launchOpts.symbol}) ${launchOpts.uri}`,
+  firstBuySol: firstBuySol ? `${firstBuySol} SOL dev buy by the launching wallet, in the pool-creation transaction (not a game buy)` : 'none',
   tradingFee: '3% flat',
   migrationSol: launchOpts.migrationQuoteThresholdSol,
   fees: `game fee address ${feeAddress().toBase58()} → 80% jackpot (SOL) · 20% team`,
@@ -62,6 +64,7 @@ const res = await launch(connection, authority, {
     settleGraceSecs: new BN(graceSecs),
   },
   roles: { keeper: keeperKey, team: teamKey },
+  firstBuySol,
 });
 
 console.log(JSON.stringify({

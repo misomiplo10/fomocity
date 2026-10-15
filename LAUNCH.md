@@ -85,4 +85,6 @@ cd scripts && MINT=<CA> npm run final-round                                    #
 cd scripts && MINT=<CA> CONFIRM_MAINNET=yes npm run final-round                # only when the team decides to end
 ```
 
-`npm run launch` does our own launch instead (flat 3%, fee address as fee claimer and creator).
+`npm run launch` does our own launch instead (flat 3%, fee address as fee claimer and creator, game
+attached in the same run). Optional `FIRST_BUY_SOL=<n>`: the launching wallet buys that much in the
+pool-creation transaction itself (the token's first trade; not a game buy, since the game starts after).
