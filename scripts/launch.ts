@@ -32,6 +32,8 @@ const maxTimer = Number(env('MAX_TIMER_SECS', '900'));
 const graceSecs = Number(env('SETTLE_GRACE_SECS', '60'));
 
 const firstBuySol = Number(env('FIRST_BUY_SOL', '0'));
+// Optional pre-made token address (e.g. a vanity one): path to its keypair file. Keep it secret until launch.
+const mintKeypair = process.env.MINT_KEYPAIR ? loadKeypair(process.env.MINT_KEYPAIR.replace(/^~/, process.env.HOME!)) : undefined;
 const keeperKey = new PublicKey(env('KEEPER_PUBKEY'));
 const teamKey = new PublicKey(env('TEAM_WALLET'));
 const plan = {
@@ -40,6 +42,7 @@ const plan = {
   authority: authority.publicKey.toBase58(),
   authoritySol: (await connection.getBalance(authority.publicKey)) / LAMPORTS_PER_SOL,
   token: `${launchOpts.name} (${launchOpts.symbol}) ${launchOpts.uri}`,
+  tokenAddress: mintKeypair ? mintKeypair.publicKey.toBase58() : 'random (known after launch)',
   firstBuySol: firstBuySol ? `${firstBuySol} SOL dev buy by the launching wallet, in the pool-creation transaction (not a game buy)` : 'none',
   tradingFee: '3% flat',
   migrationSol: launchOpts.migrationQuoteThresholdSol,
@@ -65,6 +68,7 @@ const res = await launch(connection, authority, {
   },
   roles: { keeper: keeperKey, team: teamKey },
   firstBuySol,
+  mint: mintKeypair,
 });
 
 console.log(JSON.stringify({
