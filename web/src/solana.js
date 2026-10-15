@@ -40,6 +40,18 @@ export async function createChain(cfg) {
   const ro = Keypair.generate();
   const wallet = { publicKey: ro.publicKey, signTransaction: async (t) => t, signAllTransactions: async (t) => t };
   const program = new Program(IDL, new AnchorProvider(connection, wallet, { commitment: 'confirmed' }));
+
+  // No game for this mint (program not deployed yet, or a leftover VITE_MINT from an earlier
+  // launch): return null so the site shows the simulation and "Launching soon" instead.
+  // A closed program keeps its program account, so check its ProgramData account too (the
+  // program account's data is a 4-byte tag followed by the ProgramData address).
+  const [progInfo, gameInfo] = await connection.getMultipleAccountsInfo([PROGRAM_ID, game]);
+  const programData = progInfo?.data?.length >= 36 ? new PublicKey(progInfo.data.subarray(4, 36)) : null;
+  const deployed = programData && (await connection.getAccountInfo(programData));
+  if (!deployed || !gameInfo) {
+    console.warn('[fomocity] no live game for', cfg.mint, '- showing the simulation');
+    return null;
+  }
   const dbc = new DynamicBondingCurveClient(connection, 'confirmed');
   const cp = new CpAmm(connection);
 

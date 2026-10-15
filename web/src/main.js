@@ -93,7 +93,8 @@ pipeline.outputNode = col.add(glow);
 // ?cluster=localnet|devnet (+ &mint=) or VITE_CLUSTER switches to the chain backend; the
 // Solana libraries are only loaded in that case, so sim mode stays light.
 const cfg = chainConfig();
-const backend = cfg ? await (await import('./solana.js')).createChain(cfg) : createSim();
+const chain = cfg ? await (await import('./solana.js')).createChain(cfg) : null;
+const backend = chain ?? createSim();
 const ui = createUI({ backend, camera, renderer, plaza, controls });
 ui.setRenderer(renderer.backend.isWebGPUBackend ? 'WebGPU' : 'WebGL2');
 
