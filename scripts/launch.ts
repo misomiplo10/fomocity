@@ -28,7 +28,7 @@ const launchOpts = {
 // never shows more than MAX_TIMER_SECS. The last counted buyer is paid the jackpot.
 const minBuySol = Number(env('MIN_BUY_SOL', '0.05'));
 const secsPerBuy = Number(env('SECS_PER_BUY', '30'));
-const maxTimer = Number(env('MAX_TIMER_SECS', '1800'));
+const maxTimer = Number(env('MAX_TIMER_SECS', '900'));
 const graceSecs = Number(env('SETTLE_GRACE_SECS', '60'));
 
 const firstBuySol = Number(env('FIRST_BUY_SOL', '0'));

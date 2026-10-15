@@ -54,7 +54,7 @@ jackpot after the token moves to the regular pool.
 | - | - | - |
 | Minimum buy that counts | 0.05 SOL | `MIN_BUY_SOL` |
 | Seconds added per buy | 30 | `SECS_PER_BUY` |
-| Round timer | 30 min | `MAX_TIMER_SECS` (rounds start at 30:00 and never show more) |
+| Round timer | 15 min | `MAX_TIMER_SECS` (rounds start at 15:00 and never show more) |
 | Settle grace | 60 s | `SETTLE_GRACE_SECS` |
 | Keeper key | (required) | `KEEPER_PUBKEY`; changeable later with `set_keeper` |
 | Team wallet | (required) | `TEAM_WALLET`; changeable later with `set_team` |

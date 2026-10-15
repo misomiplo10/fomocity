@@ -14,8 +14,8 @@ export const LAMPORTS = 1_000_000_000;
 export const DEFAULT_PARAMS = {
   minBuyLamports: 0.05 * LAMPORTS, // smallest buy that counts
   timeAddPerBuy: 30,               // seconds each counted buy adds
-  maxTimer: 30 * 60,               // the countdown never shows more than this
-  initialTimer: 30 * 60,           // countdown when a round opens
+  maxTimer: 15 * 60,               // the countdown never shows more than this
+  initialTimer: 15 * 60,           // countdown when a round opens
   settleGraceSecs: 60,             // wait after zero for late-reported buys
 };
 

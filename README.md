@@ -52,8 +52,8 @@ link can't point players at a lookalike game.
 - **Play = buy FOMO anywhere.** The keeper's tracker sees every buy on the game's Meteora pools
   (from any app) and reports each one of at least `MIN_BUY_SOL` (default 0.05 SOL) on-chain with
   `record_buy`: wallet, SOL, block time and the swap's transaction signature. Sells never count.
-- Each counted buy adds `SECS_PER_BUY` (30s) to the countdown, capped at `MAX_TIMER_SECS` (30 min)
-  after the buy. Rounds open at 30 minutes.
+- Each counted buy adds `SECS_PER_BUY` (30s) to the countdown, capped at `MAX_TIMER_SECS` (15 min)
+  after the buy. Rounds open at 15 minutes.
 - When the countdown hits 0 (plus a `SETTLE_GRACE_SECS` window for late-reported buys), anyone can
   call `settle`, which **pays the whole jackpot to the last buyer in the same instruction** and
   records them in the on-chain winners list (last 10). A round with no buys carries over.
