@@ -8,8 +8,9 @@ Read this first, then README.md and LAUNCH.md.
   winner was paid 4.1378 SOL automatically, the program was closed and its deposit refunded.
 - Program `61MMtvjn…TN6H` and its fee address `Ch5rw4…vKjD` are **dead forever**. Don't give
   them to anyone; a closed program address can never be reused.
-- The site (fomocity.net, Vercel) shows the "ended" page: `web/src/status.js` has
-  `phase: 'ended'`.
+- Relaunching as FOMO City: `web/src/status.js` is back to `phase: 'live'` and the old CA is
+  removed from Vercel (`VITE_MINT`), so fomocity.net shows the simulation and "Launching soon"
+  until the new token is attached.
 - The old wallets on the Mac are being emptied. The relaunch uses **new wallets** made on the
   laptop.
 
@@ -20,8 +21,8 @@ Read this first, then README.md and LAUNCH.md.
    `cargo build-sbf --tools-version v1.53`. Keep `opt-level = "s"` in Cargo.toml; `"z"`
    overflows the stack.
 2. **Rebrand:** new name, logo and banner (`brand/`, `web/public/logo.png`, `banner.png`),
-   titles and copy in `web/index.html`, `web/how.html`, `web/src/ui.js` and README. Set
-   `web/src/status.js` back to `phase: 'live'`.
+   titles and copy in `web/index.html`, `web/how.html`, `web/src/ui.js` and README (only if
+   the look changes).
 3. **New program ID:**
    `solana-keygen new -o target/deploy/fomocity-keypair.json --no-bip39-passphrase`. Put the
    address in `declare_id!` in `programs/fomocity/src/lib.rs`, rebuild, and regenerate

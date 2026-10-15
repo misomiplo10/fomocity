@@ -15,7 +15,7 @@ game's settings, and the keeper. The game attaches to the token after it launche
 ## The game's fee address
 
 ```
-Ch5rw4HTdEPoJQUR9Z3seSkG4YgmTQ5fo4JtZDigvKjD
+(not generated yet: new program ID first, see HANDOFF.md step 3)
 ```
 
 Print it any time with `cd scripts && npm run fee-address`. It's controlled by the game program
