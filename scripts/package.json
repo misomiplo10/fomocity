@@ -12,7 +12,8 @@
     "attach": "tsx attach.ts",
     "fund": "tsx fund.ts",
     "test:external": "tsx external.test.ts",
-    "fee-address": "tsx fee-address.ts"
+    "fee-address": "tsx fee-address.ts",
+    "final-round": "tsx final-round.ts"
   },
   "dependencies": {
     "@coral-xyz/anchor": "0.31.1",

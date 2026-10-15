@@ -15,8 +15,11 @@ game's settings, and the keeper. The game attaches to the token after it launche
 ## The game's fee address
 
 ```
-(not generated yet: new program ID first, see HANDOFF.md step 3)
+35Pix3NhWMeiHr3W9BPiVJt2iSjpJKY6Qd4xE7LXd9JC
 ```
+
+(For program `Fx4voUZZXbicWkMFSPC6ysW99E1h1zJdvzL51dxFY8ZR`, relaunch 2026-10-15. The first launch's
+`Ch5rw4…vKjD` is dead: never use it.)
 
 Print it any time with `cd scripts && npm run fee-address`. It's controlled by the game program
 (no private key exists for it) and depends only on the program ID, so it's the same before and
@@ -56,7 +59,8 @@ jackpot after the token moves to the regular pool.
 | Keeper key | (required) | `KEEPER_PUBKEY`; changeable later with `set_keeper` |
 | Team wallet | (required) | `TEAM_WALLET`; changeable later with `set_team` |
 
-These are fixed in the program: 80% jackpot / 20% team; fees after zero go to the next round;
+These are fixed in the program: 80% jackpot / 20% team; an admin-announced final round (it plays out
+and pays its winner in full, then no more rounds and later fees go to the team); fees after zero go to the next round;
 a round with no buys carries its jackpot over.
 
 ## Keeper settings
@@ -77,6 +81,8 @@ cd scripts && KEEPER_PUBKEY=<keeper> TEAM_WALLET=<team> MINT=<CA> npm run attach
 cd scripts && KEEPER_PUBKEY=<keeper> TEAM_WALLET=<team> MINT=<CA> CONFIRM_MAINNET=yes npm run attach
 cd scripts && KEEPER=~/.config/solana/fomocity-keeper.json MINT=<CA> npm run keeper
 cd scripts && FUNDER=<wallet.json> MINT=<CA> FUND_SOL=1 npm run fund          # optional top-up, 100% to the jackpot
+cd scripts && MINT=<CA> npm run final-round                                    # plan only: announce the last round
+cd scripts && MINT=<CA> CONFIRM_MAINNET=yes npm run final-round                # only when the team decides to end
 ```
 
 `npm run launch` does our own launch instead (flat 3%, fee address as fee claimer and creator).

@@ -40,7 +40,7 @@ export function createUI({ backend, camera, plaza }) {
       <div id="timer">--:--</div>
       <div class="pot">JACKPOT <span id="jackpot"></span></div>
       <div class="sub">last buyer <b id="last">—</b> · <span id="buys">0</span> buys</div>
-      ${STATUS.phase === 'final' ? '<div class="final">FINAL ROUND · the game ends when this clock hits zero. There will be no next round.</div>' : ''}
+      <div class="final" id="final" hidden></div>
     </div>
     <div id="feed" class="panel"><h3>Live buys</h3><ul id="feedlist"></ul></div>
     <div id="market" class="panel">
@@ -123,7 +123,7 @@ export function createUI({ backend, camera, plaza }) {
       push(`<li class="bb"><b>◆ ${done ? 'Migrated to DAMM v2' : 'Bonding curve complete'}</b></li>`);
       showBanner(done
         ? `<div>GRADUATED</div><big>DAMM v2</big><div>Liquidity locked forever. Its fees keep feeding the pot.</div>`
-        : `<div>BONDING CURVE COMPLETE</div><big>${MI.thresholdSol} SOL</big><div>Migrating to a Meteora pool…</div>`, 'meteora', 4500);
+        : `<div>BONDING CURVE COMPLETE</div><big>${Math.round(MI.thresholdSol)} SOL</big><div>Migrating to a Meteora pool…</div>`, 'meteora', 4500);
     }
     if (e.type === 'settled') {
       if (e.winner) push(`<li class="win"><b>🏆 #${e.round} ${nameHtml(e.winner)}</b><span>${G.fmtSol(e.payout)}</span></li>`);
@@ -146,6 +146,12 @@ export function createUI({ backend, camera, plaza }) {
   return {
     setRenderer(name) { $('#gfx').textContent = name; },
     frame() {
+      // Final round / game over: set on-chain (backend.phase) or by hand in status.js.
+      const phase = backend.phase === 'live' || !backend.phase ? STATUS.phase : backend.phase;
+      const fin = $('#final');
+      const finText = phase === 'final' ? 'FINAL ROUND · the game ends when this clock hits zero. There will be no next round.'
+        : phase === 'ended' ? 'GAME OVER · the final round has been paid out. Thanks for playing.' : '';
+      if (fin.textContent !== finText) { fin.textContent = finText; fin.hidden = !finText; }
       const r = backend.round, now = backend.now();
       const left = r.endTs - now;
       const timer = $('#timer');
@@ -173,7 +179,7 @@ export function createUI({ backend, camera, plaza }) {
         $('#phase').className = m.phase;
         $('#curvebar').style.width = `${pct}%`;
         $('#curvetxt').textContent = m.phase === 'curve'
-          ? `${m.raisedSol.toFixed(2)} / ${MI.thresholdSol} SOL raised`
+          ? `${m.raisedSol.toFixed(2)} / ${Math.round(MI.thresholdSol)} SOL raised`
           : m.volumeSol ? `Graduated · ${m.volumeSol.toFixed(1)} SOL traded` : 'Graduated';
         $('#mprice').textContent = m.price >= 1e-6 ? `${m.price.toPrecision(3)} SOL` : `${(m.price * 1e6).toPrecision(3)} SOL / 1M`;
         const fee = $('#mfee');

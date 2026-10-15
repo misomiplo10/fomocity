@@ -1,5 +1,5 @@
 {
-  "address": "61MMtvjnH4RgJj21HCPB9KNBdaAVwsThbt5czkDTTN6H",
+  "address": "Fx4voUZZXbicWkMFSPC6ysW99E1h1zJdvzL51dxFY8ZR",
   "metadata": {
     "name": "fomocity",
     "version": "0.1.0",
@@ -887,6 +887,38 @@
       ]
     },
     {
+      "name": "set_final_round",
+      "docs": [
+        "Announce that the current round is the last one. It plays out normally and its",
+        "winner is paid in full; after it settles the game is over: no more rounds, and fees",
+        "claimed from then on go to the team. Can't be undone."
+      ],
+      "discriminator": [
+        81,
+        126,
+        54,
+        62,
+        14,
+        54,
+        137,
+        149
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "game"
+          ]
+        },
+        {
+          "name": "game",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "set_keeper",
       "discriminator": [
         102,
@@ -1265,6 +1297,32 @@
       ]
     },
     {
+      "name": "FinalRound",
+      "discriminator": [
+        118,
+        9,
+        33,
+        16,
+        201,
+        226,
+        106,
+        135
+      ]
+    },
+    {
+      "name": "GameEnded",
+      "discriminator": [
+        35,
+        93,
+        113,
+        153,
+        29,
+        144,
+        200,
+        109
+      ]
+    },
+    {
       "name": "Harvested",
       "discriminator": [
         249,
@@ -1335,76 +1393,81 @@
     },
     {
       "code": 6003,
+      "name": "GameEnded",
+      "msg": "The game has ended"
+    },
+    {
+      "code": 6004,
       "name": "TimerRunning",
       "msg": "Timer still running"
     },
     {
-      "code": 6004,
+      "code": 6005,
       "name": "BadParams",
       "msg": "Invalid params"
     },
     {
-      "code": 6005,
+      "code": 6006,
       "name": "UnsupportedMint",
       "msg": "Mint has Token-2022 extensions"
     },
     {
-      "code": 6006,
+      "code": 6007,
       "name": "WrongPool",
       "msg": "Pool or config does not belong to this game's token"
     },
     {
-      "code": 6007,
+      "code": 6008,
       "name": "FeesNotInSol",
       "msg": "The pool must collect its fees in SOL (quote token)"
     },
     {
-      "code": 6008,
+      "code": 6009,
       "name": "NoFeesToGame",
       "msg": "The game's fee address is neither the pool's fee claimer nor its creator"
     },
     {
-      "code": 6009,
+      "code": 6010,
       "name": "NotKeeper",
       "msg": "Only the keeper can report buys"
     },
     {
-      "code": 6010,
+      "code": 6011,
       "name": "AlreadyMigrated",
       "msg": "DBC pool already migrated"
     },
     {
-      "code": 6011,
+      "code": 6012,
       "name": "BuyTooSmall",
       "msg": "Buy is below the minimum that counts"
     },
     {
-      "code": 6012,
+      "code": 6013,
       "name": "BuyBeforeRound",
       "msg": "Buy happened before this round started"
     },
     {
-      "code": 6013,
+      "code": 6014,
       "name": "BuyAfterDeadline",
       "msg": "Buy happened after the countdown ran out"
     },
     {
-      "code": 6014,
+      "code": 6015,
       "name": "BuyOutOfOrder",
       "msg": "Buys must be reported once each, in chain order"
     },
     {
-      "code": 6015,
+      "code": 6016,
       "name": "WinnerAccountMismatch",
       "msg": "Winner account must be passed exactly when the round has a winner"
     },
     {
-      "code": 6016,
+      "code": 6017,
       "name": "NothingToClaim",
       "msg": "Nothing to claim"
     },
     {
-      "code": 6017,
+      "code": 6018,
       "name": "WrongTeam",
       "msg": "That is not the game's team wallet"
     }
@@ -1563,6 +1626,18 @@
       }
     },
     {
+      "name": "FinalRound",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "round",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
       "name": "Game",
       "type": {
         "kind": "struct",
@@ -1666,6 +1741,17 @@
           {
             "name": "treasury_bump",
             "type": "u8"
+          },
+          {
+            "name": "final_round",
+            "docs": [
+              "Announced last round (0: none). After it settles, `ended` is set."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "ended",
+            "type": "bool"
           }
         ]
       }
@@ -1695,6 +1781,22 @@
               "DAMM v2 config the DBC pool migrates into; determines the DAMM pool address."
             ],
             "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "GameEnded",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "last_round",
+            "type": "u64"
+          },
+          {
+            "name": "to_team",
+            "type": "u64"
           }
         ]
       }

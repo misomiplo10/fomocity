@@ -9,7 +9,7 @@ import { DynamicBondingCurveClient, SwapMode } from '@meteora-ag/dynamic-bonding
 import { NATIVE_MINT, TOKEN_PROGRAM_ID, getAccount } from '@solana/spl-token';
 import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SYSVAR_CLOCK_PUBKEY, SystemProgram } from '@solana/web3.js';
 import BN from 'bn.js';
-import { fomocity, harvestDbc, launch, readGame, recordBuy, send, settle, withdrawTeam, type GameState } from './lib.ts';
+import { fomocity, harvestDbc, launch, readGame, recordBuy, send, setFinalRound, settle, withdrawTeam, type GameState } from './lib.ts';
 import { track, type Trade } from './tracker.ts';
 
 const connection = new Connection('http://127.0.0.1:8899', 'confirmed');
@@ -167,6 +167,43 @@ async function main() {
   g = await readGame(program, g0.mint);
   assert.equal(big(g.data.teamOwed), 0n);
   await expectError(withdrawTeam(program, g, authority.publicKey), 'NothingToClaim');
+
+  step('final round: announced by the admin only, once; it plays out and pays its winner');
+  await expectError(setFinalRound(fomocity(connection, carol), carol.publicKey, g), 'ConstraintHasOne');
+  await setFinalRound(program, authority.publicKey, g);
+  g = await readGame(program, g0.mint);
+  assert.equal(g.data.finalRound.toNumber(), 3);
+  await expectError(setFinalRound(program, authority.publicKey, g), 'GameEnded');
+  const tFinal = { wallet: alice.publicKey.toBase58(), lamports: String(P.minBuy), time: await chainNow(), sig: fakeSig() };
+  await recordBuy(keeperProgram, keeper, g, tFinal);
+  await swap(carol, 0.2); // trading fees during the final round still feed its jackpot
+  await harvestDbc(program, g);
+  const r3f = await fetchRound(3);
+  assert.ok(big(r3f.jackpot) > big(r3.jackpot), 'fees reached the final jackpot');
+  await waitUntil(r3f.endTs.toNumber() + P.grace);
+  const owedBefore = big((await readGame(program, g0.mint)).data.teamOwed);
+  const alice0 = await lamportsOf(alice.publicKey);
+  await settle(fomocity(connection, carol), g, carol.publicKey);
+  assert.equal(await lamportsOf(alice.publicKey) - alice0, big(r3f.jackpot) + payoutRent, 'final winner paid in full');
+
+  step('after the final round: game over, no buys, no settles, fees go to the team');
+  g = await readGame(program, g0.mint);
+  assert.ok(g.data.ended);
+  const r4 = await fetchRound(4);
+  assert.ok(r4.settled && big(r4.jackpot) === 0n, 'no round 4 is played');
+  assert.equal(big(g.data.teamOwed), owedBefore + big(r3f.nextRoundPot), 'money set aside for a next round went to the team');
+  await expectError(recordBuy(keeperProgram, keeper, g, { ...tFinal, time: await chainNow(), sig: fakeSig() }), 'GameEnded');
+  await expectError(settle(program, g, authority.publicKey), 'GameEnded');
+  const harvested0 = big(g.data.stats.harvestedLamports), owed0 = big(g.data.teamOwed);
+  await swap(carol, 0.2);
+  await harvestDbc(program, g);
+  g = await readGame(program, g0.mint);
+  const extra = big(g.data.stats.harvestedLamports) - harvested0;
+  assert.ok(extra > 0n);
+  assert.equal(big(g.data.teamOwed), owed0 + extra, '100% of later fees to the team');
+  await withdrawTeam(program, g, authority.publicKey);
+  g = await readGame(program, g0.mint);
+  assert.equal((await getAccount(connection, g.wsolVault)).amount, 0n, 'nothing left behind in the vault');
 
   step('admin hands off and renounces');
   const ms = Keypair.generate();

@@ -100,9 +100,9 @@ export type LaunchOptions = {
 };
 
 export const DEFAULT_LAUNCH: LaunchOptions = {
-  name: 'FOMO City',
+  name: 'Fomo City',
   symbol: 'FOMO',
-  uri: 'https://fomocity.example/token.json',
+  uri: 'https://www.fomocity.net/token.json',
   totalSupply: 1_000_000_000,
   migrationQuoteThresholdSol: 85,
   percentageSupplyOnMigration: 20,
@@ -367,6 +367,11 @@ export async function withdrawTeam(program: Program, g: GameState, cranker: Publ
     cranker, game: g.game, treasury: g.treasury, wsolVault: g.wsolVault, quoteMint: NATIVE_MINT,
     payout: g.payout, team: g.data.cfg.team, tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
   }).rpc();
+}
+
+/** Admin: announce that the current round is the last one (can't be undone). */
+export async function setFinalRound(program: Program, authority: PublicKey, g: GameState) {
+  return program.methods.setFinalRound().accountsStrict({ authority, game: g.game }).rpc();
 }
 
 /** Keeper: report one qualifying buy (from the tracker) to the program. */

@@ -248,6 +248,9 @@ export async function createChain(cfg) {
       keeperMaxFeeBps: 200,
     },
     get round() { return round; },
+    // Set on-chain by the admin (npm run final-round): 'final' while the last round runs,
+    // 'ended' once it has been paid out.
+    get phase() { return gameData?.ended ? 'ended' : num(gameData?.finalRound ?? 0) ? 'final' : 'live'; },
     get winners() { return winners; },
     get market() { return market; },
     now,

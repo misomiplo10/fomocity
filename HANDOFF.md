@@ -14,6 +14,15 @@ Read this first, then README.md and LAUNCH.md.
 - The old wallets on the Mac are being emptied. The relaunch uses **new wallets** made on the
   laptop.
 
+## Relaunch status (2026-10-15, on the Mac)
+
+Done, nothing on-chain yet: new program ID `Fx4voUZZXbicWkMFSPC6ysW99E1h1zJdvzL51dxFY8ZR`
+(fee address `35Pix3NhWMeiHr3W9BPiVJt2iSjpJKY6Qd4xE7LXd9JC`), final-round switch
+(`npm run final-round`, only when the team says so) with tests passing on localnet, token
+metadata at `web/public/token.json` (Fomo City / FOMO, logo, site, X), launch defaults set.
+Same deploy and keeper wallets as launch 1 (keys on the Mac), same team wallet. Launch will
+use our own `npm run launch` (launch + attach in one step). Waiting on: funding, then deploy.
+
 ## Relaunch checklist
 
 1. **Setup on the laptop:** clone `misomiplo10/fomocity`, then `npm ci` in `web/` and `scripts/`.

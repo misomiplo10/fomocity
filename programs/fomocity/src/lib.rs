@@ -18,7 +18,7 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{self, CloseAccount, Mint, TokenAccount, TokenInterface, TransferChecked};
 
-declare_id!("61MMtvjnH4RgJj21HCPB9KNBdaAVwsThbt5czkDTTN6H");
+declare_id!("Fx4voUZZXbicWkMFSPC6ysW99E1h1zJdvzL51dxFY8ZR");
 
 declare_program!(dynamic_bonding_curve);
 declare_program!(cp_amm);
@@ -87,6 +87,7 @@ pub mod fomocity {
     pub fn record_buy(ctx: Context<RecordBuy>, wallet: Pubkey, lamports: u64, buy_ts: i64, sig: [u8; 64]) -> Result<()> {
         let p = ctx.accounts.game.params;
         let now = Clock::get()?.unix_timestamp;
+        require!(!ctx.accounts.game.ended, FomoError::GameEnded);
         let round = &mut ctx.accounts.round;
         require!(!round.settled, FomoError::RoundOver);
         require!(lamports >= p.min_buy_lamports, FomoError::BuyTooSmall);
@@ -118,6 +119,7 @@ pub mod fomocity {
     pub fn settle(ctx: Context<Settle>) -> Result<()> {
         let now = Clock::get()?.unix_timestamp;
         let p = ctx.accounts.game.params;
+        require!(!ctx.accounts.game.ended, FomoError::GameEnded);
         let round = &mut ctx.accounts.round;
         require!(!round.settled, FomoError::AlreadySettled);
         require!(now >= round.end_ts + p.settle_grace_secs, FomoError::TimerRunning);
@@ -166,6 +168,20 @@ pub mod fomocity {
 
         game.current_round += 1;
         let p = game.params;
+        if game.final_round != 0 && round.id >= game.final_round {
+            // That was the announced final round: the game is over. No new round is played
+            // (the next round account opens already closed), and what was set aside for it
+            // goes to the team, like every fee from here on.
+            game.ended = true;
+            game.team_owed = game.team_owed.checked_add(carry).ok_or(FomoError::Overflow)?;
+            let next = &mut ctx.accounts.next_round;
+            next.open(game.current_round, now, &p, 0, ctx.bumps.next_round);
+            next.end_ts = now;
+            next.settled = true;
+            emit!(Settled { round: round.id, winner: if has_winner { round.last_buyer } else { Pubkey::default() }, jackpot: paid, carry: 0 });
+            emit!(GameEnded { last_round: round.id, to_team: carry });
+            return Ok(());
+        }
         ctx.accounts.next_round.open(game.current_round, now, &p, carry, ctx.bumps.next_round);
         emit!(Settled { round: round.id, winner: if has_winner { round.last_buyer } else { Pubkey::default() }, jackpot: paid, carry });
         Ok(())
@@ -396,6 +412,17 @@ pub mod fomocity {
         Ok(())
     }
 
+    /// Announce that the current round is the last one. It plays out normally and its
+    /// winner is paid in full; after it settles the game is over: no more rounds, and fees
+    /// claimed from then on go to the team. Can't be undone.
+    pub fn set_final_round(ctx: Context<Admin>) -> Result<()> {
+        let game = &mut ctx.accounts.game;
+        require!(game.final_round == 0 && !game.ended, FomoError::GameEnded);
+        game.final_round = game.current_round;
+        emit!(FinalRound { round: game.final_round });
+        Ok(())
+    }
+
     pub fn set_keeper(ctx: Context<Admin>, keeper: Pubkey) -> Result<()> {
         ctx.accounts.game.cfg.keeper = keeper;
         Ok(())
@@ -432,7 +459,7 @@ pub fn split_fees(amount: u64) -> (u64, u64) {
 /// 80% to the live round's jackpot (or the next round's, once the countdown has run out,
 /// so fees never change a decided round), 20% to the team.
 fn credit_fees(game: &mut Account<Game>, round: &mut Account<Round>, venue: Venue, amount: u64) -> Result<()> {
-    let (to_jackpot, to_team) = split_fees(amount);
+    let (to_jackpot, to_team) = if game.ended { (0, amount) } else { split_fees(amount) };
     let now = Clock::get()?.unix_timestamp;
     let live = !round.settled && now < round.end_ts;
     if live {
@@ -512,6 +539,9 @@ pub struct Game {
     pub winners_head: u8,
     pub bump: u8,
     pub treasury_bump: u8,
+    /// Announced last round (0: none). After it settles, `ended` is set.
+    pub final_round: u64,
+    pub ended: bool,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Default, InitSpace)]
@@ -807,6 +837,10 @@ pub enum Venue {
 #[event]
 pub struct BuyRecorded { pub round: u64, pub wallet: Pubkey, pub lamports: u64, pub buy_ts: i64, pub end_ts: i64, pub sig: [u8; 64] }
 #[event]
+pub struct FinalRound { pub round: u64 }
+#[event]
+pub struct GameEnded { pub last_round: u64, pub to_team: u64 }
+#[event]
 pub struct Settled { pub round: u64, pub winner: Pubkey, pub jackpot: u64, pub carry: u64 }
 #[event]
 pub struct Harvested { pub round: u64, pub venue: Venue, pub lamports: u64, pub to_jackpot: u64, pub to_team: u64, pub to_current_round: bool }
@@ -822,6 +856,7 @@ pub enum FomoError {
     #[msg("Round is over")] RoundOver,
     #[msg("Arithmetic overflow")] Overflow,
     #[msg("Round already settled")] AlreadySettled,
+    #[msg("The game has ended")] GameEnded,
     #[msg("Timer still running")] TimerRunning,
     #[msg("Invalid params")] BadParams,
     #[msg("Mint has Token-2022 extensions")] UnsupportedMint,

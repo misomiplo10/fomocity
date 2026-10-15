@@ -55,6 +55,8 @@ async function report(t: Trade) {
     const g = await readGame(program, mint);
     const round: any = await (program.account as any).round.fetch(g.round(BigInt(g.data.currentRound.toString())));
     const why =
+      g.data.ended ? 'the game has ended' :
+      round.settled ? 'round already settled' :
       BigInt(t.lamports) < BigInt(g.data.params.minBuyLamports.toString()) ? 'below minimum' :
       t.time! < round.startTs.toNumber() ? 'before this round' :
       t.time! >= round.endTs.toNumber() ? 'after the countdown ended' :
